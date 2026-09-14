@@ -1,0 +1,1 @@
+import{a as e}from"./utils-CFYxKZY8.js";import{t}from"./places-hub-CScFuCZR.js";import{n}from"./index-CMiJlRUi.js";var r=e();function i(){let{tripId:e}=n.useParams();return(0,r.jsx)(t,{tripId:e})}export{i as component};
