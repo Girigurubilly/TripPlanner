@@ -20,7 +20,7 @@ jobs:
           node-version: "22"
           cache: npm
       - run: npm ci
-      - run: npm run build
+      - run: npm run build:pages
         env:
           VITE_BASE: /${{ github.event.repository.name }}/
       - name: Stage Pages artifact
