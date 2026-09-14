@@ -1,0 +1,493 @@
+import { TOKYO_CATALOG } from "@/data/catalog";
+import type {
+  AlternatePlan,
+  AppBackup,
+  Booking,
+  ItineraryItem,
+  Place,
+  Priority,
+  Trip,
+} from "@/types/trip";
+
+const CREATED = "2026-08-02T09:00:00.000Z";
+
+function catalogPlace(
+  name: string,
+  extra: Partial<Place> & { id: string; priority: Priority },
+): Place {
+  const src = TOKYO_CATALOG.find((p) => p.name === name);
+  if (!src) throw new Error(`Missing catalog place: ${name}`);
+  return {
+    id: extra.id,
+    name: src.name,
+    googlePlaceId: src.googlePlaceId,
+    address: src.address,
+    lat: src.lat,
+    lng: src.lng,
+    category: src.category,
+    tags: src.tags,
+    neighbourhood: src.neighbourhood,
+    notes: extra.notes ?? "",
+    source: extra.source ?? "search",
+    estimatedDurationMin: src.estimatedDurationMin,
+    openingHours: src.openingHours,
+    reservationRequired: src.reservationRequired,
+    indoorOutdoor: src.indoorOutdoor,
+    photos: extra.photos ?? src.photos ?? [],
+    status: extra.status ?? "saved",
+    createdAt: CREATED,
+    priority: extra.priority,
+    ...("address" in extra ? {} : {}),
+  };
+}
+
+export const SEED_PLACES: Place[] = [
+  catalogPlace("Senso-ji", {
+    id: "place-sensoji",
+    priority: "must-do",
+    status: "planned",
+    notes: "Go early before tour groups. Side streets east of the gate are quieter for photos.",
+  }),
+  catalogPlace("Nakamise-dori", {
+    id: "place-nakamise",
+    priority: "want",
+    status: "planned",
+    notes: "Ningyo-yaki and matcha snacks. Keep it short — the temple is the point.",
+  }),
+  catalogPlace("Tokyo Skytree", {
+    id: "place-skytree",
+    priority: "if-time",
+    notes: "Only if the weather is clear. Skip if Shibuya Sky is already booked.",
+  }),
+  catalogPlace("Ueno Park", {
+    id: "place-ueno",
+    priority: "want",
+    status: "planned",
+  }),
+  catalogPlace("Tokyo National Museum", {
+    id: "place-tnm",
+    priority: "must-do",
+    status: "planned",
+    notes: "Honkan first. Closed Mondays.",
+  }),
+  catalogPlace("Yanaka Ginza", {
+    id: "place-yanaka",
+    priority: "must-do",
+    notes: "Late-afternoon snack street. Cats, senbei, sunset on the hill.",
+  }),
+  catalogPlace("Akihabara Electric Town", {
+    id: "place-akihabara",
+    priority: "want",
+    status: "planned",
+    notes: "Radio Kaikan and a gachapon pass. Easy to overstay.",
+  }),
+  catalogPlace("Meiji Jingu", {
+    id: "place-meiji",
+    priority: "must-do",
+    status: "planned",
+    notes: "Enter from the Harajuku side. Stay on the gravel for the forest effect.",
+  }),
+  catalogPlace("Takeshita Street", {
+    id: "place-takeshita",
+    priority: "if-time",
+    status: "planned",
+  }),
+  catalogPlace("Shibuya Crossing", {
+    id: "place-crossing",
+    priority: "must-do",
+    status: "planned",
+    notes: "Magato Starbucks view is the classic angle if the line is short.",
+  }),
+  catalogPlace("Shibuya Sky", {
+    id: "place-sky",
+    priority: "must-do",
+    status: "planned",
+    notes: "Timed ticket already booked. Golden hour if the queue allows.",
+  }),
+  catalogPlace("Ichiran Shibuya", {
+    id: "place-ichiran",
+    priority: "want",
+    status: "planned",
+  }),
+  catalogPlace("Daikanyama T-Site", {
+    id: "place-tsite",
+    priority: "want",
+    status: "planned",
+    notes: "Tsutaya + coffee. Good rainy-day swap.",
+  }),
+  catalogPlace("Tsukiji Outer Market", {
+    id: "place-tsukiji",
+    priority: "must-do",
+    status: "planned",
+    notes: "Tamagoyaki and a grilled scallop. Do not expect the inner market.",
+  }),
+  catalogPlace("Ginza", {
+    id: "place-ginza",
+    priority: "want",
+    status: "planned",
+    notes: "Itoya, Uniqlo, wandering. Indoor-heavy if it rains.",
+  }),
+  catalogPlace("Imperial Palace East Gardens", {
+    id: "place-east-gardens",
+    priority: "want",
+    notes: "Closed Mondays and Fridays — do not park this on 21 Sep.",
+  }),
+  catalogPlace("Tokyo Tower", {
+    id: "place-tower",
+    priority: "want",
+    status: "planned",
+    notes: "Exterior photos from Zojoji are enough unless you want the deck.",
+  }),
+  catalogPlace("Roppongi Hills Mori Garden", {
+    id: "place-roppongi",
+    priority: "if-time",
+    status: "planned",
+  }),
+  catalogPlace("Gonpachi Nishi-Azabu", {
+    id: "place-gonpachi",
+    priority: "must-do",
+    status: "planned",
+    notes: "Reservation on file. Ask for a counter seat if the tatami rooms are full.",
+  }),
+  catalogPlace("teamLab Planets", {
+    id: "place-teamlab",
+    priority: "must-do",
+    status: "planned",
+    notes: "Barefoot. Leave large luggage at the hotel. Tickets booked 10:00.",
+  }),
+  catalogPlace("Tokyo Metropolitan Government Building", {
+    id: "place-tmg",
+    priority: "want",
+    status: "planned",
+    notes: "Free South Observatory. Good arrival-evening plan.",
+  }),
+  catalogPlace("Omoide Yokocho", {
+    id: "place-omoide",
+    priority: "must-do",
+    status: "planned",
+    notes: "One beer, one skewer shop. Cash.",
+  }),
+  catalogPlace("Golden Gai", {
+    id: "place-golden",
+    priority: "want",
+    status: "planned",
+    notes: "Walk the lanes even if you do not drink. Tiny doors, no photos inside.",
+  }),
+  catalogPlace("Ghibli Museum", {
+    id: "place-ghibli",
+    priority: "must-do",
+    notes: "Needs a timed ticket. Closed Tuesday (departure day). Mitaka is a half-day.",
+  }),
+  catalogPlace("Gotokuji Temple", {
+    id: "place-gotokuji",
+    priority: "want",
+    notes: "Maneki-neko hill. Combine with Shimokitazawa.",
+  }),
+  catalogPlace("Shimokitazawa", {
+    id: "place-shimokita",
+    priority: "want",
+    notes: "Vintage loop + a cafe. Good rainy indoor shopping.",
+  }),
+  catalogPlace("Nakano Broadway", {
+    id: "place-nakano",
+    priority: "if-time",
+    notes: "Fully indoor. Strong rainy-day candidate with Koenji.",
+  }),
+  catalogPlace("Koenji", {
+    id: "place-koenji",
+    priority: "if-time",
+  }),
+  catalogPlace("Nezu Museum", {
+    id: "place-nezu",
+    priority: "want",
+    notes: "Garden plus collection. Closed Monday.",
+  }),
+  catalogPlace("Kiyosumi Gardens", {
+    id: "place-kiyosumi",
+    priority: "if-time",
+  }),
+  catalogPlace("Blue Bottle Coffee Kiyosumi", {
+    id: "place-bluebottle",
+    priority: "if-time",
+  }),
+  catalogPlace("Starbucks Reserve Roastery Nakameguro", {
+    id: "place-roastery",
+    priority: "want",
+    notes: "Indoor design stop. Pairs with Daikanyama.",
+  }),
+  catalogPlace("Kagurazaka", {
+    id: "place-kagurazaka",
+    priority: "want",
+    notes: "Evening stone alleys. Easy from Shinjuku.",
+  }),
+  catalogPlace("Maisen Aoyama", {
+    id: "place-maisen",
+    priority: "if-time",
+  }),
+];
+
+const TRIP_ID = "trip-tokyo-2026";
+
+export const SEED_TRIP: Trip = {
+  id: TRIP_ID,
+  name: "Tokyo on foot",
+  destination: "Tokyo, Japan",
+  destinations: [
+    {
+      id: "tokyo",
+      name: "Tokyo",
+      country: "Japan",
+      timezone: "Asia/Tokyo",
+      lat: 35.6812,
+      lng: 139.7671,
+      iata: "HND",
+    },
+  ],
+  startDate: "2026-09-18",
+  endDate: "2026-09-22",
+  timezone: "Asia/Tokyo",
+  arrivalTime: "14:40",
+  departureTime: "19:10",
+  arrivalAirport: "NRT",
+  departureAirport: "HND",
+  pace: "moderate",
+  preferredTransport: "transit",
+  hotels: [
+    {
+      id: "hotel-gracery",
+      name: "Hotel Gracery Shinjuku",
+      address: "1-19-1 Kabukicho, Shinjuku City, Tokyo",
+      lat: 35.6955,
+      lng: 139.7013,
+      checkInDate: "2026-09-18",
+      checkOutDate: "2026-09-22",
+      checkInTime: "15:00",
+      checkOutTime: "11:00",
+      notes: "Godzilla head on the corner. Ask for a high floor away from Kabukicho sirens.",
+    },
+  ],
+  placeIds: SEED_PLACES.map((p) => p.id),
+  notes: "Independent 5-day loop from Shinjuku. Prioritise neighbourhoods over ticking towers.",
+  createdAt: CREATED,
+};
+
+function item(
+  id: string,
+  placeId: string,
+  date: string,
+  order: number,
+  start: string,
+  end: string,
+  extra: Partial<ItineraryItem> = {},
+): ItineraryItem {
+  const place = SEED_PLACES.find((p) => p.id === placeId)!;
+  return {
+    id,
+    tripId: TRIP_ID,
+    placeId,
+    date,
+    order,
+    startTime: start,
+    endTime: end,
+    durationMin: extra.durationMin ?? place.estimatedDurationMin,
+    notes: extra.notes ?? "",
+    priority: extra.priority ?? place.priority,
+    locked: extra.locked ?? false,
+    progressStatus: "pending",
+    ...extra,
+  };
+}
+
+export const SEED_ITEMS: ItineraryItem[] = [
+  item("item-d1-tmg", "place-tmg", "2026-09-18", 0, "17:20", "18:10", {
+    locked: true,
+    notes: "Arrival buffer already baked in. South observatory.",
+  }),
+  item("item-d1-omoide", "place-omoide", "2026-09-18", 1, "18:40", "19:50"),
+  item("item-d1-golden", "place-golden", "2026-09-18", 2, "20:10", "21:10"),
+
+  item("item-d2-sensoji", "place-sensoji", "2026-09-19", 0, "08:15", "09:30"),
+  item("item-d2-nakamise", "place-nakamise", "2026-09-19", 1, "09:30", "10:00"),
+  item("item-d2-ueno", "place-ueno", "2026-09-19", 2, "10:50", "11:50"),
+  item("item-d2-tnm", "place-tnm", "2026-09-19", 3, "12:00", "13:30"),
+  item("item-d2-aki", "place-akihabara", "2026-09-19", 4, "16:30", "18:00"),
+
+  item("item-d3-meiji", "place-meiji", "2026-09-20", 0, "08:00", "09:15"),
+  item("item-d3-take", "place-takeshita", "2026-09-20", 1, "09:30", "10:15"),
+  item("item-d3-cross", "place-crossing", "2026-09-20", 2, "10:40", "11:00"),
+  item("item-d3-ichiran", "place-ichiran", "2026-09-20", 3, "11:10", "11:50"),
+  item("item-d3-sky", "place-sky", "2026-09-20", 4, "14:00", "15:15", { locked: true }),
+  item("item-d3-tsite", "place-tsite", "2026-09-20", 5, "16:00", "17:00"),
+
+  item("item-d4-tsukiji", "place-tsukiji", "2026-09-21", 0, "07:30", "09:00"),
+  item("item-d4-ginza", "place-ginza", "2026-09-21", 1, "10:00", "11:30"),
+  item("item-d4-tower", "place-tower", "2026-09-21", 2, "14:00", "15:00"),
+  item("item-d4-roppongi", "place-roppongi", "2026-09-21", 3, "15:40", "16:40"),
+  item("item-d4-gonpachi", "place-gonpachi", "2026-09-21", 4, "19:00", "20:30", { locked: true }),
+
+  item("item-d5-teamlab", "place-teamlab", "2026-09-22", 0, "10:00", "12:00", {
+    locked: true,
+    notes: "Checkout is 11:00. Leave bags at the desk or take a coin locker in Toyosu.",
+  }),
+];
+
+export const SEED_BOOKINGS: Booking[] = [
+  {
+    id: "book-nh26",
+    tripId: TRIP_ID,
+    type: "flight",
+    title: "NH 26  SFO → NRT",
+    confirmationNumber: "K8PQ2M",
+    startAt: "2026-09-17T11:55:00-07:00",
+    endAt: "2026-09-18T14:40:00+09:00",
+    cancellationDeadline: "",
+    notes: "Window seat. ANA mileage.",
+    imageDataUrl: "",
+    pdfUrl: "",
+    status: "confirmed",
+  },
+  {
+    id: "book-cx543",
+    tripId: TRIP_ID,
+    type: "flight",
+    title: "CX 543  HND → HKG",
+    confirmationNumber: "Q29L11",
+    startAt: "2026-09-22T19:10:00+09:00",
+    endAt: "2026-09-22T22:55:00+08:00",
+    cancellationDeadline: "2026-09-15",
+    notes: "Need to be at HND by 17:10. Terminal 3.",
+    imageDataUrl: "",
+    pdfUrl: "",
+    status: "confirmed",
+  },
+  {
+    id: "book-hotel",
+    tripId: TRIP_ID,
+    type: "hotel",
+    title: "Hotel Gracery Shinjuku · 4 nights",
+    confirmationNumber: "GRC-774219",
+    startAt: "2026-09-18",
+    endAt: "2026-09-22",
+    cancellationDeadline: "2026-09-16",
+    notes: "Free cancellation until 16 Sep. Twin room.",
+    imageDataUrl: "",
+    pdfUrl: "",
+    status: "confirmed",
+  },
+  {
+    id: "book-limousine",
+    tripId: TRIP_ID,
+    type: "transfer",
+    title: "Airport Limousine NRT → Shinjuku",
+    confirmationNumber: "LM-3301",
+    startAt: "2026-09-18T16:05:00+09:00",
+    endAt: "2026-09-18T17:10:00+09:00",
+    cancellationDeadline: "",
+    notes: "Bus stop 8, Terminal 2. Drop-off at Shinjuku Station West.",
+    imageDataUrl: "",
+    pdfUrl: "",
+    status: "confirmed",
+  },
+  {
+    id: "book-sky",
+    tripId: TRIP_ID,
+    type: "ticket",
+    title: "Shibuya Sky  14:00",
+    confirmationNumber: "SKY-1400-19",
+    startAt: "2026-09-20T14:00:00+09:00",
+    endAt: "2026-09-20T15:15:00+09:00",
+    cancellationDeadline: "2026-09-19",
+    notes: "QR in wallet.",
+    imageDataUrl: "",
+    pdfUrl: "",
+    itineraryItemId: "item-d3-sky",
+    placeId: "place-sky",
+    status: "confirmed",
+  },
+  {
+    id: "book-teamlab",
+    tripId: TRIP_ID,
+    type: "ticket",
+    title: "teamLab Planets  10:00",
+    confirmationNumber: "TLP-1000-22",
+    startAt: "2026-09-22T10:00:00+09:00",
+    endAt: "2026-09-22T12:00:00+09:00",
+    cancellationDeadline: "2026-09-20",
+    notes: "Barefoot. No large bags.",
+    imageDataUrl: "",
+    pdfUrl: "",
+    itineraryItemId: "item-d5-teamlab",
+    placeId: "place-teamlab",
+    status: "confirmed",
+  },
+  {
+    id: "book-gonpachi",
+    tripId: TRIP_ID,
+    type: "restaurant",
+    title: "Gonpachi Nishi-Azabu",
+    confirmationNumber: "GP-2109-19",
+    startAt: "2026-09-21T19:00:00+09:00",
+    endAt: "2026-09-21T20:30:00+09:00",
+    cancellationDeadline: "2026-09-20",
+    notes: "Table for two, 19:00. Call if running late.",
+    imageDataUrl: "",
+    pdfUrl: "",
+    itineraryItemId: "item-d4-gonpachi",
+    placeId: "place-gonpachi",
+    status: "confirmed",
+  },
+  {
+    id: "book-insurance",
+    tripId: TRIP_ID,
+    type: "insurance",
+    title: "World Nomads travel insurance",
+    confirmationNumber: "WN-882014",
+    startAt: "2026-09-17",
+    endAt: "2026-09-23",
+    cancellationDeadline: "",
+    notes: "Policy PDF in email.",
+    imageDataUrl: "",
+    pdfUrl: "",
+    status: "confirmed",
+  },
+  {
+    id: "book-esim",
+    tripId: TRIP_ID,
+    type: "esim",
+    title: "Airalo Japan  10 GB / 7 days",
+    confirmationNumber: "AIR-JP-5510",
+    startAt: "2026-09-18",
+    endAt: "2026-09-25",
+    cancellationDeadline: "",
+    notes: "Install before wheels-up. Network: KDDI.",
+    imageDataUrl: "",
+    pdfUrl: "",
+    status: "confirmed",
+  },
+];
+
+export const SEED_ALTERNATES: AlternatePlan[] = [
+  {
+    id: "plan-rain",
+    tripId: TRIP_ID,
+    label: "Rain plan",
+    description: "Swap outdoor shrine/street time for indoor museums, bookstores and covered shopping.",
+    dates: {
+      "2026-09-19": ["place-tnm", "place-akihabara", "place-nakano"],
+      "2026-09-20": ["place-sky", "place-tsite", "place-roastery", "place-ichiran"],
+      "2026-09-21": ["place-ginza", "place-nezu", "place-gonpachi"],
+    },
+  },
+];
+
+export function createSeedBackup(): AppBackup {
+  return {
+    version: 1,
+    exportedAt: CREATED,
+    places: SEED_PLACES,
+    trips: [SEED_TRIP],
+    items: SEED_ITEMS,
+    bookings: SEED_BOOKINGS,
+    alternatePlans: SEED_ALTERNATES,
+  };
+}

@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Trip Canvas</title>
+    <script>
+      (function () {
+        var path = location.pathname + location.search + location.hash;
+        var segments = location.pathname.split("/").filter(Boolean);
+        var root =
+          location.hostname.endsWith("github.io") && segments.length
+            ? "/" + segments[0] + "/"
+            : "/";
+        var rel = path.replace(new RegExp("^" + root.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), "/");
+        location.replace(root + "?path=" + encodeURIComponent(rel));
+      })();
+    </script>
+  </head>
+  <body>
+    <p>Redirecting to Trip Canvas…</p>
+  </body>
+</html>
