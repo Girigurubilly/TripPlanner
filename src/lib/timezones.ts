@@ -62,14 +62,32 @@ export function zoneCity(tz: string) {
   return city.replace(/_/g, " ");
 }
 
-export function searchTimeZones(query: string, limit = 12): string[] {
+export function zoneRegion(tz: string) {
+  if (!tz.includes("/")) return "Other";
+  return tz.split("/")[0]?.replace(/_/g, " ") ?? "Other";
+}
+
+export function searchTimeZones(query: string, limit = 80): string[] {
   const zones = listTimeZones();
   const q = query.trim().toLowerCase().replace(/\s+/g, "_");
-  if (!q) {
-    const preferred = new Set(FALLBACK_ZONES);
-    return [...FALLBACK_ZONES, ...zones.filter((z) => !preferred.has(z))].slice(0, limit);
-  }
-  return zones
-    .filter((z) => z.toLowerCase().includes(q) || z.replace(/_/g, " ").toLowerCase().includes(q.replace(/_/g, " ")))
+  const qSpace = q.replace(/_/g, " ");
+  const preferred = FALLBACK_ZONES.filter((z) => zones.includes(z));
+  const preferredSet = new Set(preferred);
+  const rest = zones.filter((z) => !preferredSet.has(z));
+  const ordered = [...preferred, ...rest];
+  if (!q) return ordered.slice(0, limit);
+
+  const wantsOffset = q.startsWith("gmt") || q.startsWith("utc") || q.startsWith("+") || q.startsWith("-");
+  return ordered
+    .filter((z) => {
+      const lower = z.toLowerCase();
+      const city = zoneCity(z).toLowerCase();
+      if (lower.includes(q) || lower.replace(/_/g, " ").includes(qSpace) || city.includes(qSpace)) return true;
+      if (wantsOffset) {
+        const off = zoneOffset(z, "en").toLowerCase().replace(/\s+/g, "");
+        return off.includes(q.replace(/_/g, "")) || off.replace("gmt", "").includes(q.replace(/_/g, ""));
+      }
+      return false;
+    })
     .slice(0, limit);
 }

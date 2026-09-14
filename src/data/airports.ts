@@ -15,14 +15,15 @@ type CompactAirport = [string, string, string, string, string, number, number];
 const POPULAR = [
   "HKG", "TPE", "NRT", "HND", "KIX", "NGO", "CTS", "FUK", "OKA",
   "ICN", "PUS", "SIN", "BKK", "CNX", "KUL", "PEN", "MNL", "SGN", "HAN", "DPS",
-  "PVG", "PEK", "CAN", "SZX", "MFM",
+  "PVG", "PEK", "CAN", "SZX", "MFM", "KHH", "RMQ",
   "LHR", "LGW", "CDG", "AMS", "FRA", "FCO", "MAD", "BCN", "ZRH", "IST",
-  "JFK", "EWR", "LAX", "SFO", "ORD", "SEA", "YVR", "YYZ",
-  "SYD", "MEL", "AKL", "DXB", "DOH", "AUH",
+  "JFK", "EWR", "LAX", "SFO", "ORD", "SEA", "YVR", "YYZ", "MIA", "ATL",
+  "SYD", "MEL", "AKL", "DXB", "DOH", "AUH", "DEL", "BOM", "CGK", "JNB",
 ];
 
 let cache: Airport[] | null = null;
 let inflight: Promise<Airport[]> | null = null;
+const countryAliasCache = new Map<string, string[]>();
 
 function expand(row: CompactAirport): Airport {
   return {
@@ -63,7 +64,26 @@ function fold(s: string) {
     .trim();
 }
 
+function countryAliases(code: string): string[] {
+  if (!code) return [];
+  const hit = countryAliasCache.get(code);
+  if (hit) return hit;
+  const names = [fold(code)];
+  for (const loc of ["en", "zh-Hant", "zh-HK", "zh-Hans", "zh-CN", "ja"]) {
+    try {
+      const n = new Intl.DisplayNames([loc], { type: "region" }).of(code.toUpperCase());
+      if (n) names.push(fold(n));
+    } catch {
+      /* ignore */
+    }
+  }
+  const uniq = [...new Set(names.filter(Boolean))];
+  countryAliasCache.set(code, uniq);
+  return uniq;
+}
+
 function scoreAirport(q: string, a: Airport): number {
+  if (!q) return 0;
   const iata = fold(a.iata);
   const name = fold(a.name);
   const city = fold(a.city);
@@ -74,13 +94,20 @@ function scoreAirport(q: string, a: Airport): number {
   if (name.startsWith(q)) return 90;
   if (city.includes(q)) return 70;
   if (name.includes(q)) return 50;
-  if (fold(a.country) === q) return 20;
+  const countries = countryAliases(a.country);
+  if (countries.some((n) => n === q)) return 28;
+  if (q.length >= 2 && countries.some((n) => n.startsWith(q))) return 18;
   return 0;
 }
 
-export function searchAirports(airports: Airport[], query: string, limit = 12): Airport[] {
-  const q = fold(query);
-  if (!q) {
+export function searchAirports(
+  airports: Airport[],
+  query: string,
+  limit = 12,
+  extraQueries: string[] = [],
+): Airport[] {
+  const terms = [...new Set([query, ...extraQueries].map(fold).filter(Boolean))];
+  if (!terms.length) {
     const popular = new Map(POPULAR.map((code, i) => [code, i]));
     return airports
       .filter((a) => popular.has(a.iata))
@@ -88,7 +115,7 @@ export function searchAirports(airports: Airport[], query: string, limit = 12): 
       .slice(0, limit);
   }
   return airports
-    .map((a) => ({ a, s: scoreAirport(q, a) }))
+    .map((a) => ({ a, s: Math.max(...terms.map((t) => scoreAirport(t, a))) }))
     .filter((x) => x.s > 0)
     .sort((a, b) => b.s - a.s || a.a.iata.localeCompare(b.a.iata))
     .slice(0, limit)

@@ -152,9 +152,9 @@ export function TripsDashboard() {
                       </Badge>
                       <Button
                         type="button"
-                        size="icon"
+                        size="sm"
                         variant="ghost"
-                        className="pointer-events-auto min-h-11 min-w-11 text-muted hover:text-danger sm:size-8"
+                        className="pointer-events-auto min-h-11 gap-1 px-2 text-danger hover:bg-danger-soft sm:min-h-8"
                         aria-label={t("dashboard.deleteTrip")}
                         onClick={(e) => {
                           e.preventDefault();
@@ -163,6 +163,7 @@ export function TripsDashboard() {
                         }}
                       >
                         <Trash2 className="size-4" />
+                        <span className="hidden sm:inline">{t("common.delete")}</span>
                       </Button>
                     </div>
                   </div>

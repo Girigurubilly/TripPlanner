@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { MapPin, Plane, Plus, X } from "lucide-react";
 import {
   airportToDestination,
@@ -33,31 +33,43 @@ export function DestinationSearch({
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
   const [airports, setAirports] = useState<Airport[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
 
+  function refreshAirports() {
+    setLoading(true);
+    setLoadError(false);
+    void loadAirports()
+      .then((list) => setAirports(list))
+      .catch(() => setLoadError(true))
+      .finally(() => setLoading(false));
+  }
+
   useEffect(() => {
-    let live = true;
-    void loadAirports().then((list) => {
-      if (live) setAirports(list);
-    });
-    return () => {
-      live = false;
-    };
+    refreshAirports();
   }, []);
 
   const selectedIds = value.map((d) => d.id);
   const selectedIata = new Set(value.map((d) => d.iata).filter(Boolean));
   const cityHits = useMemo(() => searchDestinations(query, selectedIds), [query, value]);
+  const extraAirportQueries = useMemo(
+    () => (query.trim() ? cityHits.flatMap((c) => [c.name, c.iata ?? ""]).filter(Boolean) : []),
+    [cityHits, query],
+  );
   const airportHits = useMemo(
-    () => searchAirports(airports, query, query.trim() ? 8 : 6).filter((a) => !selectedIata.has(a.iata)),
-    [airports, query, value],
+    () =>
+      searchAirports(airports, query, query.trim() ? 20 : 12, extraAirportQueries).filter(
+        (a) => !selectedIata.has(a.iata),
+      ),
+    [airports, query, extraAirportQueries, value],
   );
 
   const hits: Hit[] = useMemo(() => {
     const q = query.trim();
     const cities: Hit[] = cityHits.map((c) => ({ kind: "city", id: `city-${c.id}`, cityId: c.id }));
     const apts: Hit[] = airportHits.map((a) => ({ kind: "airport", id: `apt-${a.iata}`, iata: a.iata }));
-    if (q.length === 3) return [...apts, ...cities];
+    if (q.length === 3 && /^[a-zA-Z]{3}$/.test(q)) return [...apts, ...cities];
     return [...cities, ...apts];
   }, [cityHits, airportHits, query]);
 
@@ -186,8 +198,15 @@ export function DestinationSearch({
         {open ? (
           <div className="absolute z-30 mt-1 w-full overflow-hidden rounded-lg border border-line bg-surface shadow-lift">
             <p className="px-3 pt-2 pb-1 text-[11px] font-medium tracking-wide text-faint uppercase">{heading}</p>
-            <ul role="listbox" className="max-h-72 overflow-y-auto p-1">
+            <ul role="listbox" className="max-h-80 overflow-y-auto p-1">
               {hits.map((hit, index) => {
+                const prev = hits[index - 1];
+                const showHeader = !prev || prev.kind !== hit.kind;
+                const header = showHeader ? (
+                  <li key={`${hit.kind}-head`} className="px-2.5 pt-2 pb-1 text-[11px] font-medium tracking-wide text-faint uppercase">
+                    {hit.kind === "city" ? t("newTrip.destCities") : t("newTrip.destAirports")}
+                  </li>
+                ) : null;
                 if (hit.kind === "city") {
                   const city = DESTINATIONS.find((c) => c.id === hit.cityId);
                   if (!city) return null;
@@ -197,7 +216,42 @@ export function DestinationSearch({
                   const country =
                     city.countryNames[locale === "zh-Hant" ? "zhHant" : locale === "zh-Hans" ? "zhHans" : locale === "ja" ? "ja" : "en"];
                   return (
-                    <li key={hit.id}>
+                    <Fragment key={hit.id}>
+                      {header}
+                      <li>
+                        <button
+                          type="button"
+                          role="option"
+                          aria-selected={index === active}
+                          className={`flex w-full items-center gap-3 rounded-md px-2.5 py-2.5 text-left ${
+                            index === active ? "bg-accent-soft" : "hover:bg-surface-2"
+                          }`}
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => addCity(toTripDestination(city))}
+                        >
+                          <span className="grid size-8 shrink-0 place-items-center rounded-md bg-accent-soft text-accent">
+                            <MapPin className="size-4" />
+                          </span>
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate text-sm font-medium">{name}</span>
+                            <span className="block truncate text-xs text-muted">
+                              {country}
+                              {city.iata ? ` · ${city.iata}` : ""}
+                              {nearby ? ` · ${t("newTrip.nearSelected")}` : ""}
+                            </span>
+                          </span>
+                          <Plus className="size-4 text-faint" />
+                        </button>
+                      </li>
+                    </Fragment>
+                  );
+                }
+                const airport = airports.find((a) => a.iata === hit.iata);
+                if (!airport) return null;
+                return (
+                  <Fragment key={hit.id}>
+                    {header}
+                    <li>
                       <button
                         type="button"
                         role="option"
@@ -206,54 +260,36 @@ export function DestinationSearch({
                           index === active ? "bg-accent-soft" : "hover:bg-surface-2"
                         }`}
                         onMouseDown={(e) => e.preventDefault()}
-                        onClick={() => addCity(toTripDestination(city))}
+                        onClick={() => addCity(airportToDestination(airport))}
                       >
                         <span className="grid size-8 shrink-0 place-items-center rounded-md bg-accent-soft text-accent">
-                          <MapPin className="size-4" />
+                          <Plane className="size-4" />
                         </span>
                         <span className="min-w-0 flex-1">
-                          <span className="block truncate text-sm font-medium">{name}</span>
+                          <span className="block truncate text-sm font-medium">
+                            {airport.iata} · {airport.name}
+                          </span>
                           <span className="block truncate text-xs text-muted">
-                            {country}
-                            {city.iata ? ` · ${city.iata}` : ""}
-                            {nearby ? ` · ${t("newTrip.nearSelected")}` : ""}
+                            {airportLine(airport, loc)} · {t("newTrip.destAirport")}
                           </span>
                         </span>
                         <Plus className="size-4 text-faint" />
                       </button>
                     </li>
-                  );
-                }
-                const airport = airports.find((a) => a.iata === hit.iata);
-                if (!airport) return null;
-                return (
-                  <li key={hit.id}>
-                    <button
-                      type="button"
-                      role="option"
-                      aria-selected={index === active}
-                      className={`flex w-full items-center gap-3 rounded-md px-2.5 py-2.5 text-left ${
-                        index === active ? "bg-accent-soft" : "hover:bg-surface-2"
-                      }`}
-                      onMouseDown={(e) => e.preventDefault()}
-                      onClick={() => addCity(airportToDestination(airport))}
-                    >
-                      <span className="grid size-8 shrink-0 place-items-center rounded-md bg-accent-soft text-accent">
-                        <Plane className="size-4" />
-                      </span>
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-sm font-medium">
-                          {airport.iata} · {airport.name}
-                        </span>
-                        <span className="block truncate text-xs text-muted">
-                          {airportLine(airport, loc)} · {t("newTrip.destAirport")}
-                        </span>
-                      </span>
-                      <Plus className="size-4 text-faint" />
-                    </button>
-                  </li>
+                  </Fragment>
                 );
               })}
+              {loading && !airports.length ? (
+                <li className="px-3 py-3 text-sm text-muted">{t("newTrip.loadingAirports")}</li>
+              ) : null}
+              {loadError ? (
+                <li className="px-3 py-3 text-sm">
+                  <p className="text-muted">{t("newTrip.airportsFailed")}</p>
+                  <Button type="button" size="sm" variant="secondary" className="mt-2 min-h-9" onClick={refreshAirports}>
+                    {t("newTrip.retryAirports")}
+                  </Button>
+                </li>
+              ) : null}
               {query.trim() && !hits.some((h) => h.kind === "city" && DESTINATIONS.find((c) => c.id === h.cityId)?.name.toLowerCase() === query.trim().toLowerCase()) ? (
                 <li>
                   <button
@@ -269,14 +305,19 @@ export function DestinationSearch({
                   </button>
                 </li>
               ) : null}
-              {!hits.length && !query.trim() ? (
+              {!hits.length && !query.trim() && !loading ? (
                 <li className="px-3 py-3 text-sm text-muted">{t("newTrip.noDestMatch")}</li>
               ) : null}
             </ul>
           </div>
         ) : null}
       </div>
-      <p className="text-xs text-muted">{t("newTrip.multiDestHint")}</p>
+      <p className="text-xs text-muted">
+        {t("newTrip.multiDestHint")}{" "}
+        {airports.length
+          ? t("newTrip.worldAirportsHint", { n: airports.length.toLocaleString(loc) })
+          : t("newTrip.loadingAirports")}
+      </p>
       {(() => {
         const chips = value.length
           ? searchDestinations("", value.map((d) => d.id)).filter((c) => nearbyIds.includes(c.id)).slice(0, 6)

@@ -25,6 +25,7 @@ export function TimeSelect({
   return (
     <Combobox
       value={value}
+      displayValue={value}
       onChange={(next) => {
         const parsed = parseTimeInput(next);
         if (parsed) onChange(parsed);
@@ -36,7 +37,7 @@ export function TimeSelect({
       disabled={disabled}
       className={className}
       inputClassName={inputClassName}
-      clearOnFocus={false}
+      appearance="select"
     />
   );
 }
