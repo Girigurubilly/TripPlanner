@@ -2,7 +2,19 @@
 
 Personal travel planner: turn a saved-place list into a realistic, map-based day-by-day itinerary. Everything stays in the browser (`localStorage`) until you export a backup. No API keys.
 
-Live on GitHub Pages: [girigurubilly.github.io/TripPlanner](https://girigurubilly.github.io/TripPlanner/)
+Repository: [github.com/Girigurubilly/TripPlanner](https://github.com/Girigurubilly/TripPlanner)
+
+GitHub Pages URL (after enabling Pages below): [girigurubilly.github.io/TripPlanner](https://girigurubilly.github.io/TripPlanner/)
+
+## Enable GitHub Pages (one time)
+
+The built site is already on the `gh-pages` branch. In the repo:
+
+1. Open [Settings → Pages](https://github.com/Girigurubilly/TripPlanner/settings/pages)
+2. **Branch**: `gh-pages` / `/ (root)`
+3. Save
+
+The site is then at `https://girigurubilly.github.io/TripPlanner/`. Later pushes to `main` rebuild and update that branch.
 
 ## Features
 
@@ -14,9 +26,3 @@ Live on GitHub Pages: [girigurubilly.github.io/TripPlanner](https://girigurubill
 - Delete any trip; JSON backup / restore
 
 Airport catalogue is derived from [mwgg/Airports](https://github.com/mwgg/Airports) (OurAirports data). Time zones use the IANA list from the browser.
-
-## GitHub Pages
-
-The app is a client-side SPA. On push to `main`, GitHub Actions builds with `VITE_BASE=/TripPlanner/` and deploys.
-
-Deep links fall back through `public/404.html` (`?path=/…`).
