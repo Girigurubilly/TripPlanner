@@ -33,6 +33,7 @@ import {
   type TripDay,
 } from "@/lib/trip";
 import { DrivePanel } from "@/components/drive-panel";
+import { syncTripDriveIfDue } from "@/lib/drive-sync";
 import { AI_TRIP_PROMPT } from "@/lib/ai-prompt";
 
 const TAB_ICON: Record<string, LucideIcon> = {
@@ -149,6 +150,7 @@ export function TripApp() {
   const [error, setError] = useState("");
   const [dragOver, setDragOver] = useState(false);
   const [promptFallback, setPromptFallback] = useState(false);
+  const [rev, setRev] = useState(0);
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -164,6 +166,25 @@ export function TripApp() {
     }
     setReady(true);
   }, []);
+
+  useEffect(() => {
+    if (!ready) return;
+    if (window.location.hash.includes("access_token") || window.location.hash.includes("error=")) return;
+    let cancel = false;
+    void syncTripDriveIfDue().then((result) => {
+      if (cancel || (result !== "pulled" && result !== "pushed")) return;
+      if (result === "pulled") {
+        const next = loadTrips();
+        setTrips(next);
+        setOpenId((id) => (next.some((trip) => trip.id === id) ? id : ""));
+        setRev((value) => value + 1);
+      }
+      setStatus(result === "pulled" ? "已從 Google Drive 更新今日行程。" : "已將行程同步上 Google Drive。");
+    });
+    return () => {
+      cancel = true;
+    };
+  }, [ready]);
 
   useEffect(() => {
     if (!ready) return;
@@ -341,6 +362,7 @@ export function TripApp() {
 
   return (
     <Book
+      key={`${openTrip.id}-${rev}`}
       trip={openTrip}
       tab={tab}
       dayId={dayId}

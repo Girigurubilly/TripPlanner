@@ -18,6 +18,33 @@ import {
 } from "@/lib/trip";
 
 const PASS_KEY = "tripbook-drive-pass";
+const DAILY_KEY = "tripbook-drive-daily";
+
+function todayKey(): string {
+  const now = new Date();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${now.getFullYear()}-${month}-${day}`;
+}
+
+export async function syncTripDriveIfDue(): Promise<SyncResult | "skip"> {
+  if (typeof navigator !== "undefined" && navigator.onLine === false) return "offline";
+  try {
+    if (localStorage.getItem(DAILY_KEY) === todayKey()) return "skip";
+  } catch {
+    return "skip";
+  }
+  if (!readDrivePass() || !readGoogleClientId()) return "skip";
+  const result = await syncTripDrive();
+  if (result !== "offline") {
+    try {
+      localStorage.setItem(DAILY_KEY, todayKey());
+    } catch {
+      /* ignore */
+    }
+  }
+  return result;
+}
 
 export type TripSnapshot = {
   schemaVersion: 1;
