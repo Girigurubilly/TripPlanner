@@ -924,7 +924,7 @@ function Book({
         ) : null}
 
         {trip.footer && !searching && !spot && topicAt === null ? <p className="foot">{trip.footer}</p> : null}
-        {!searching && !spot && topicAt === null ? (
+        {!searching && !spot && topicAt === null && rootTab === "overview" ? (
           <button className="btn save-trip" type="button" onClick={() => void downloadTrip(trip)}>
             <Download size={18} aria-hidden="true" />
             儲存行程
