@@ -717,27 +717,6 @@ function GuidePane({ html }: { html: string }) {
   );
 }
 
-function nestDeep(html: string): string {
-  if (!html.includes("deep") || typeof DOMParser === "undefined") return html;
-  const doc = new DOMParser().parseFromString(`<div id="spot-html">${html}</div>`, "text/html");
-  const root = doc.getElementById("spot-html");
-  if (!root) return html;
-  for (const box of [...root.querySelectorAll(".deep")]) {
-    if (!(box instanceof HTMLElement) || box.tagName === "DETAILS") continue;
-    const heading = box.querySelector("h4, h3");
-    const details = document.createElement("details");
-    details.className = "deep";
-    const summary = document.createElement("summary");
-    summary.textContent = (heading?.textContent || "深度導覽").replace(/\s+/g, " ").trim();
-    heading?.remove();
-    const body = document.createElement("div");
-    while (box.firstChild) body.append(box.firstChild);
-    details.append(summary, body);
-    box.replaceWith(details);
-  }
-  return root.innerHTML;
-}
-
 function DayPane({
   trip,
   day,
@@ -750,10 +729,12 @@ function DayPane({
   const rationale = trip.rationales.find((item) => item.city && item.city === day.city);
   const stripRef = useRef<HTMLDivElement>(null);
   const [openAll, setOpenAll] = useState(false);
+  const [openSpots, setOpenSpots] = useState<Record<string, boolean>>({});
   const index = trip.days.findIndex((item) => item.id === day.id);
 
   useEffect(() => {
     setOpenAll(false);
+    setOpenSpots({});
     const current = stripRef.current?.querySelector('[aria-pressed="true"]');
     current?.scrollIntoView({ inline: "center", block: "nearest" });
   }, [day.id]);
@@ -832,18 +813,37 @@ function DayPane({
             </button>
           </div>
         ) : null}
-        {day.spots.map((spot, spotIndex) => (
-          <details className="spot" key={`${spot.name}-${openAll ? "open" : "shut"}`} {...(openAll ? { open: true } : {})}>
-            <summary>
-              <span className="spot-row">
+        {day.spots.map((spot, spotIndex) => {
+          const key = `${spotIndex}-${spot.name}`;
+          const shown = openAll || Boolean(openSpots[key]);
+          return (
+            <div className="spot" key={key}>
+              <button
+                className="spot-row"
+                type="button"
+                aria-expanded={shown}
+                onClick={() => {
+                  if (openAll) {
+                    const next: Record<string, boolean> = {};
+                    day.spots.forEach((item, itemIndex) => {
+                      next[`${itemIndex}-${item.name}`] = true;
+                    });
+                    next[key] = false;
+                    setOpenAll(false);
+                    setOpenSpots(next);
+                    return;
+                  }
+                  setOpenSpots((current) => ({ ...current, [key]: !current[key] }));
+                }}
+              >
                 <span className="spot-index">{spotIndex + 1}</span>
                 <span className="spotname">{spot.name}</span>
                 {spot.badge ? <span className={`badge ${spot.tone}`}>{spot.badge}</span> : null}
-              </span>
-            </summary>
-            <div className="spotbody" dangerouslySetInnerHTML={{ __html: nestDeep(spot.html) }} />
-          </details>
-        ))}
+              </button>
+              {shown ? <div className="spotbody" dangerouslySetInnerHTML={{ __html: spot.html }} /> : null}
+            </div>
+          );
+        })}
         <DayNotes tripId={trip.id} dayId={day.id} />
       </section>
     </>

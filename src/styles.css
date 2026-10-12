@@ -483,22 +483,28 @@ summary:focus-visible {
   flex: 0 0 auto;
 }
 details.spot > summary {
-  display: block;
+  display: list-item;
   cursor: pointer;
   list-style: none;
   padding: 0;
 }
-details.spot > summary::-webkit-details-marker,
-details.spot > summary::marker {
+details.spot > summary::-webkit-details-marker {
   display: none;
-  content: "";
 }
 .spot-row {
   display: flex;
   align-items: center;
   gap: 10px;
+  width: 100%;
   min-height: 44px;
   padding: 14px 16px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
 }
 details.spot > summary:hover .spot-row,
 .spot-row:hover {
@@ -876,36 +882,15 @@ li.hours {
   list-style: none;
   font-weight: 650;
 }
-details.spot {
+details.spot,
+.spot {
   background: #fff;
   border: 1px solid var(--line);
   border-radius: 12px;
   margin: 12px 0;
-  overflow: hidden;
 }
 details.spot > summary {
   font-weight: 700;
-}
-details.deep {
-  background: #fbf8f1;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  margin: 12px 0;
-}
-details.deep > summary {
-  cursor: pointer;
-  display: block;
-  list-style: none;
-  padding: 12px 16px;
-  font-weight: 700;
-  color: var(--accent);
-}
-details.deep > summary::-webkit-details-marker,
-details.deep > summary::marker {
-  content: "";
-}
-details.deep > div {
-  padding: 0 16px 12px;
 }
 .spotname {
   flex: 1;
