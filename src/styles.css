@@ -1224,6 +1224,57 @@ a[data-goto] {
   width: calc(100% - 32px);
   margin: 8px 16px 20px;
 }
+.extras {
+  margin-top: 8px;
+}
+.extra-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px;
+  border-bottom: 1px solid var(--line);
+}
+.extra-row:last-child {
+  border-bottom: 0;
+}
+.extra-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+.here-go {
+  width: 100%;
+  margin-top: 12px;
+}
+.here {
+  margin-top: 12px;
+  padding: 14px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+}
+.here input {
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: 6px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 10px 12px;
+  font: inherit;
+  font-size: 16px;
+  background: #fff;
+}
+.here-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+.here-actions .btn {
+  flex: 1;
+}
+a.stamp {
+  text-decoration: none;
+}
 
 .lightbox {
   position: fixed;

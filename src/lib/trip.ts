@@ -549,6 +549,87 @@ export function replaceVisits(visits: VisitMap): void {
   localStorage.setItem(VISITS_KEY, JSON.stringify(visits));
 }
 
+export type ExtraStop = {
+  id: string;
+  dayId: string;
+  name: string;
+  address: string;
+  lat: number;
+  lng: number;
+  at: string;
+};
+
+export type ExtraMap = Record<string, ExtraStop[]>;
+
+const EXTRAS_KEY = "tripextras.v1";
+
+function asStop(value: unknown): ExtraStop | null {
+  if (!value || typeof value !== "object") return null;
+  const raw = value as Record<string, unknown>;
+  const name = asString(raw.name).trim();
+  const dayId = asString(raw.dayId).trim();
+  const lat = Number(raw.lat);
+  const lng = Number(raw.lng);
+  if (!name || !dayId || !Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  return {
+    id: asString(raw.id).trim() || `extra-${Date.now().toString(36)}`,
+    dayId,
+    name: name.slice(0, 80),
+    address: asString(raw.address).trim().slice(0, 160),
+    lat,
+    lng,
+    at: asString(raw.at) || new Date().toISOString(),
+  };
+}
+
+function readExtraMap(): ExtraMap {
+  try {
+    const raw = localStorage.getItem(EXTRAS_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    if (!parsed || typeof parsed !== "object") return {};
+    const map: ExtraMap = {};
+    for (const [tripId, rows] of Object.entries(parsed)) {
+      if (!Array.isArray(rows)) continue;
+      map[tripId] = rows.flatMap((row) => {
+        const stop = asStop(row);
+        return stop ? [stop] : [];
+      });
+    }
+    return map;
+  } catch {
+    return {};
+  }
+}
+
+export function loadExtras(tripId: string): ExtraStop[] {
+  return readExtraMap()[tripId] || [];
+}
+
+export function addExtra(tripId: string, stop: Omit<ExtraStop, "id" | "at">): ExtraStop {
+  const all = readExtraMap();
+  const next: ExtraStop = { ...stop, id: `extra-${Date.now().toString(36)}`, at: new Date().toISOString() };
+  all[tripId] = [...(all[tripId] || []), next];
+  localStorage.setItem(EXTRAS_KEY, JSON.stringify(all));
+  touchLocalEdit();
+  return next;
+}
+
+export function removeExtra(tripId: string, id: string): void {
+  const all = readExtraMap();
+  all[tripId] = (all[tripId] || []).filter((stop) => stop.id !== id);
+  localStorage.setItem(EXTRAS_KEY, JSON.stringify(all));
+  touchLocalEdit();
+}
+
+export function exportExtras(): ExtraMap {
+  return readExtraMap();
+}
+
+export function replaceExtras(extras: ExtraMap): void {
+  localStorage.setItem(EXTRAS_KEY, JSON.stringify(extras));
+}
+
 export type CheckMap = Record<string, Record<string, boolean>>;
 
 const CHECKS_KEY = "tripchecks.v1";
@@ -647,6 +728,11 @@ export function deleteTrip(current: TripBook[], id: string): TripBook[] {
     delete visits[id];
     localStorage.setItem(VISITS_KEY, JSON.stringify(visits));
   }
+  const extras = readExtraMap();
+  if (extras[id]) {
+    delete extras[id];
+    localStorage.setItem(EXTRAS_KEY, JSON.stringify(extras));
+  }
   return trips;
 }
 
@@ -671,11 +757,13 @@ export function replaceLibrary(
   editedAt: string,
   checks?: CheckMap,
   visits?: VisitMap,
+  extras?: ExtraMap,
 ): void {
   saveTrips(trips, { silent: true });
   localStorage.setItem(NOTES_KEY, JSON.stringify(notes));
   if (checks) replaceChecks(checks);
   if (visits) replaceVisits(visits);
+  if (extras) replaceExtras(extras);
   touchLocalEdit(editedAt);
 }
 
@@ -747,6 +835,7 @@ export function absorbSaved(text: string): void {
   const notes = loadAllNotes();
   const checks = readCheckMap();
   const visits = readVisitMap();
+  const extras = readExtraMap();
   let changed = false;
   for (const item of list) {
     if (!item || typeof item !== "object") continue;
@@ -767,11 +856,19 @@ export function absorbSaved(text: string): void {
       visits[id] = bag.visits as Record<string, string>;
       changed = true;
     }
+    if (Array.isArray(bag.extras)) {
+      extras[id] = bag.extras.flatMap((row) => {
+        const stop = asStop(row);
+        return stop ? [stop] : [];
+      });
+      changed = true;
+    }
   }
   if (!changed) return;
   localStorage.setItem(NOTES_KEY, JSON.stringify(notes));
   localStorage.setItem(CHECKS_KEY, JSON.stringify(checks));
   localStorage.setItem(VISITS_KEY, JSON.stringify(visits));
+  localStorage.setItem(EXTRAS_KEY, JSON.stringify(extras));
   touchLocalEdit();
 }
 
@@ -782,6 +879,7 @@ export async function downloadTrip(trip: TripBook): Promise<void> {
       notes: loadAllNotes()[trip.id] || {},
       checks: readCheckMap()[trip.id] || {},
       visits: readVisitMap()[trip.id] || {},
+      extras: readExtraMap()[trip.id] || [],
     },
   };
   const blob = new Blob([JSON.stringify(file, null, 2)], { type: "application/json" });

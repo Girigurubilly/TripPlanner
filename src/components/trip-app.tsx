@@ -39,6 +39,10 @@ import {
   visitKey,
   writeCheck,
   writeVisit,
+  addExtra,
+  loadExtras,
+  removeExtra,
+  type ExtraStop,
   type TripBook,
   type TripSpot,
   type TripDay,
@@ -46,6 +50,7 @@ import {
 import { DrivePanel } from "@/components/drive-panel";
 import { syncTripDriveIfDue } from "@/lib/drive-sync";
 import { AI_TRIP_PROMPT } from "@/lib/ai-prompt";
+import { currentPlace, type PlaceFix } from "@/lib/geo";
 
 const TAB_ICON: Record<string, LucideIcon> = {
   overview: BookOpen,
@@ -1519,6 +1524,7 @@ function DayScreen({
           </div>
         </>
       ) : null}
+      <ExtraStops tripId={trip.id} dayId={day.id} />
       <DayNotes tripId={trip.id} dayId={day.id} />
       {rationale ? (
         <section className="why">
@@ -1623,6 +1629,114 @@ function DayNav({
         <ChevronRight size={18} aria-hidden="true" />
       </button>
     </nav>
+  );
+}
+
+function ExtraStops({ tripId, dayId }: { tripId: string; dayId: string }) {
+  const [rows, setRows] = useState<ExtraStop[]>([]);
+  const [fixing, setFixing] = useState(false);
+  const [error, setError] = useState("");
+  const [draft, setDraft] = useState<PlaceFix | null>(null);
+
+  useEffect(() => {
+    const load = () => setRows(loadExtras(tripId).filter((stop) => stop.dayId === dayId));
+    load();
+    window.addEventListener("trip-extras", load);
+    return () => window.removeEventListener("trip-extras", load);
+  }, [tripId, dayId]);
+
+  async function locate() {
+    setFixing(true);
+    setError("");
+    setDraft(null);
+    try {
+      setDraft(await currentPlace());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "而家定位唔到");
+    } finally {
+      setFixing(false);
+    }
+  }
+
+  function confirm() {
+    if (!draft || !draft.name.trim()) return;
+    addExtra(tripId, {
+      dayId,
+      name: draft.name.trim(),
+      address: draft.address,
+      lat: draft.lat,
+      lng: draft.lng,
+    });
+    setDraft(null);
+    window.dispatchEvent(new Event("trip-extras"));
+  }
+
+  return (
+    <div className="extras">
+      {rows.length ? (
+        <>
+          <h2 className="section-label">未排行程</h2>
+          <div className="sheet">
+            {rows.map((stop) => (
+              <div className="extra-row" key={stop.id}>
+                <strong>{stop.name}</strong>
+                <span className="pill-hint">
+                  {visitClock(stop.at)}
+                  {stop.address ? ` · ${stop.address}` : ""}
+                </span>
+                <span className="extra-actions">
+                  <a className="stamp" href={`https://www.google.com/maps/search/?api=1&query=${stop.lat},${stop.lng}`} target="_blank" rel="noopener">
+                    地圖
+                  </a>
+                  <button
+                    className="stamp"
+                    type="button"
+                    onClick={() => {
+                      removeExtra(tripId, stop.id);
+                      window.dispatchEvent(new Event("trip-extras"));
+                    }}
+                  >
+                    取消
+                  </button>
+                </span>
+              </div>
+            ))}
+          </div>
+        </>
+      ) : null}
+      {draft ? (
+        <form
+          className="here"
+          onSubmit={(event) => {
+            event.preventDefault();
+            confirm();
+          }}
+        >
+          <p className="muted">定位到呢度</p>
+          <input
+            value={draft.name}
+            placeholder="地方名"
+            aria-label="地方名"
+            onChange={(event) => setDraft({ ...draft, name: event.target.value })}
+          />
+          {draft.address ? <p className="tiny">{draft.address}</p> : null}
+          {draft.accuracy ? <p className="tiny">大約 {draft.accuracy} 米</p> : null}
+          <div className="here-actions">
+            <button className="btn primary" type="submit" disabled={!draft.name.trim()}>
+              確認打卡
+            </button>
+            <button className="btn ghost" type="button" onClick={() => setDraft(null)}>
+              取消
+            </button>
+          </div>
+        </form>
+      ) : (
+        <button className="btn here-go" type="button" disabled={fixing} onClick={() => void locate()}>
+          {fixing ? "正在定位…" : "打卡新地方"}
+        </button>
+      )}
+      {error ? <p className="status error">{error}</p> : null}
+    </div>
   );
 }
 
