@@ -10,7 +10,6 @@ import {
   Download,
   Gift,
   Info,
-  Library,
   TrainFront,
   Trash2,
   Upload,
@@ -26,7 +25,6 @@ import {
   parseTripFile,
   saveNote,
   saveUi,
-  tabsFor,
   tripStats,
   upsertTrips,
   type TripBook,
@@ -293,7 +291,7 @@ function TripCard({
   const cities = [...new Set(trip.days.map((day) => day.city).filter(Boolean))];
   return (
     <article className="trip-tile">
-      <button className="trip-open" type="button" onClick={onOpen}>
+      <div className="trip-open" onClick={onOpen}>
         {cover ? <img className="trip-cover" src={cover} alt="" /> : <span className="trip-cover empty-cover" />}
         <span className="trip-copy">
           <strong>{trip.title}</strong>
@@ -309,7 +307,7 @@ function TripCard({
           ) : null}
           <span className="muted">{tripStats(trip)}</span>
         </span>
-      </button>
+      </div>
       {confirm ? (
         <div className="confirm-row">
           <span>刪除呢個行程？</span>
@@ -346,11 +344,12 @@ function Book({
   onBack: () => void;
   onDelete: () => void;
 }) {
-  const tabs = useMemo(() => tabsFor(trip), [trip]);
-  const activeTab = tabs.some((item) => item.id === tab) ? tab : tabs[0]?.id || "";
+  const activeTab = tab || (trip.days.length ? "days" : "overview");
   const activeDay = trip.days.find((day) => day.id === dayId) || trip.days[0];
   const [lightbox, setLightbox] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [spotAt, setSpotAt] = useState<number | null>(null);
+  const [topicAt, setTopicAt] = useState<number | null>(null);
   const scrollDay = useRef("");
   const mainRef = useRef<HTMLElement>(null);
 
@@ -370,7 +369,7 @@ function Book({
 
   useEffect(() => {
     if (mainRef.current) labelTables(mainRef.current);
-  }, [activeTab, activeDay?.id, trip.id]);
+  }, [activeTab, activeDay?.id, trip.id, topicAt, spotAt]);
 
   useEffect(() => {
     if (activeTab !== "transport" || !scrollDay.current) return;
@@ -396,16 +395,67 @@ function Book({
     }
   }
 
-  const guide = trip.guides.find((item) => item.id === activeTab);
-  const showDayNav = activeTab === "days" && trip.days.length > 1;
+  const guideIds = new Set(trip.guides.map((guide) => guide.id));
+  const rootTab =
+    guideIds.has(activeTab) || activeTab === "guides"
+      ? "guides"
+      : activeTab === "days" || activeTab === "transport"
+        ? activeTab
+        : "overview";
+
+  useEffect(() => {
+    setSpotAt(null);
+  }, [activeDay?.id]);
+
+  useEffect(() => {
+    setTopicAt(null);
+  }, [activeTab, trip.id]);
+
+  const openGuide = guideIds.has(activeTab) ? trip.guides.find((guide) => guide.id === activeTab) : undefined;
+  const guideParsed = useMemo(() => (openGuide ? guideSlices(openGuide.html) : null), [openGuide]);
+  const topic = guideParsed && topicAt !== null ? guideParsed.slices[topicAt] : undefined;
+  const topicHtml = useMemo(() => (topic ? presentSlice(topic.html) : ""), [topic]);
+  const spot = activeDay && spotAt !== null ? activeDay.spots[spotAt] : undefined;
+
+  let screenTitle = trip.title;
+  if (spot) screenTitle = spot.name;
+  else if (rootTab === "days" && activeDay) screenTitle = activeDay.label || activeDay.title;
+  else if (rootTab === "transport") screenTitle = "交通";
+  else if (topic) screenTitle = topic.title;
+  else if (openGuide) screenTitle = openGuide.label;
+  else if (rootTab === "guides") screenTitle = "指南";
+  else screenTitle = "總覽";
+
+  function goBack() {
+    if (spotAt !== null) {
+      setSpotAt(null);
+      return;
+    }
+    if (topicAt !== null) {
+      setTopicAt(null);
+      return;
+    }
+    if (rootTab === "guides" && openGuide) {
+      onTab("guides");
+      return;
+    }
+    onBack();
+  }
+
+  function openDock(id: string) {
+    setSpotAt(null);
+    setTopicAt(null);
+    onTab(id);
+    window.scrollTo({ top: 0 });
+  }
 
   return (
-    <div className={showDayNav ? "app book has-daynav" : "app book"} onClick={onContentClick}>
+    <div className="app book app-shell" onClick={onContentClick}>
       <header className="topbar">
-        <button className="icon-btn" type="button" aria-label="返回行程庫" onClick={onBack}>
-          <Library size={18} aria-hidden="true" />
+        <button className="icon-btn" type="button" aria-label={spot || topic || openGuide ? "返回" : "返回行程庫"} onClick={goBack}>
+          <ChevronLeft size={20} aria-hidden="true" />
         </button>
-        <p className="top-title">{trip.title}</p>
+        <p className="top-title">{screenTitle}</p>
         <button className="icon-btn" type="button" aria-label="匯出 JSON" onClick={() => downloadTrip(trip)}>
           <Download size={18} aria-hidden="true" />
         </button>
@@ -424,49 +474,99 @@ function Book({
           </button>
         </div>
       ) : null}
-      <header className="hero">
-        <h1>{trip.title}</h1>
-        {trip.subtitle ? <p>{trip.subtitle}</p> : null}
-        {trip.tagline ? <p>{trip.tagline}</p> : null}
-      </header>
-      <nav className="tabs" aria-label="行程分頁">
-        {tabs.map((item) => {
-          const Icon = TAB_ICON[item.id] ?? BookOpen;
-          return (
-            <button
-              key={item.id}
-              type="button"
-              aria-selected={item.id === activeTab}
-              onClick={() => {
-                onTab(item.id);
-                window.scrollTo({ top: 0, behavior: "smooth" });
-              }}
-            >
-              <Icon size={16} aria-hidden="true" />
-              <span>{item.label}</span>
-            </button>
-          );
-        })}
-      </nav>
       <main ref={mainRef}>
-        {activeTab === "overview" ? <Html html={trip.overviewHtml} /> : null}
-        {activeTab === "days" && activeDay ? (
-          <DayPane trip={trip} day={activeDay} onDay={onDay} />
+        {spot && activeDay ? (
+          <article className="screen reading">
+            {spot.badge ? <p className="spot-badge-row"><span className={`badge ${spot.tone}`}>{spot.badge}</span></p> : null}
+            <div dangerouslySetInnerHTML={{ __html: spot.html }} />
+          </article>
         ) : null}
-        {activeTab === "transport" ? (
-          <Transport
+
+        {!spot && rootTab === "overview" ? (
+          <article className="screen reading">
+            <h1 className="screen-title">{trip.title}</h1>
+            {trip.subtitle ? <p className="lede">{trip.subtitle}</p> : null}
+            {trip.tagline ? <p className="lede">{trip.tagline}</p> : null}
+            <Html html={trip.overviewHtml} />
+          </article>
+        ) : null}
+
+        {!spot && rootTab === "days" && activeDay ? (
+          <DayScreen
             trip={trip}
-            onJump={(id) => {
-              document.getElementById(`leg-${id}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+            day={activeDay}
+            onDay={(id) => {
+              setSpotAt(null);
+              onDay(id);
+              window.scrollTo({ top: 0 });
+            }}
+            onSpot={(index) => {
+              setSpotAt(index);
+              window.scrollTo({ top: 0 });
             }}
           />
         ) : null}
-        {guide ? <GuidePane html={guide.html} /> : null}
-        {trip.footer ? <p className="foot">{trip.footer}</p> : null}
+
+        {!spot && rootTab === "transport" ? <Transport trip={trip} /> : null}
+
+        {!spot && rootTab === "guides" && !openGuide ? (
+          <section className="screen">
+            <h1 className="screen-title">指南</h1>
+            <div className="sheet">
+              {trip.guides.map((guide) => (
+                <div className="navrow" key={guide.id} onClick={() => openDock(guide.id)}>
+                  <span className="navrow-main">
+                    <strong>{guide.label}</strong>
+                  </span>
+                  <span className="navrow-go" aria-hidden="true">›</span>
+                </div>
+              ))}
+            </div>
+          </section>
+        ) : null}
+
+        {!spot && openGuide && topicAt === null ? (
+          <section className="screen">
+            {guideParsed?.lead ? <div className="reading lede-block" dangerouslySetInnerHTML={{ __html: guideParsed.lead }} /> : null}
+            <div className="sheet">
+              {(guideParsed?.slices || []).map((item, index) => (
+                <div
+                  className="navrow"
+                  key={`${item.title}-${index}`}
+                  onClick={() => {
+                    setTopicAt(index);
+                    window.scrollTo({ top: 0 });
+                  }}
+                >
+                  <span className="navrow-num">{index + 1}</span>
+                  <span className="navrow-main">
+                    <strong>{item.title}</strong>
+                  </span>
+                  <span className="navrow-go" aria-hidden="true">›</span>
+                </div>
+              ))}
+            </div>
+          </section>
+        ) : null}
+
+        {!spot && topic ? (
+          <article className="screen reading" dangerouslySetInnerHTML={{ __html: topicHtml || topic.html }} />
+        ) : null}
+
+        {trip.footer && !spot && topicAt === null ? <p className="foot">{trip.footer}</p> : null}
       </main>
-      {showDayNav && activeDay ? (
-        <DayNav trip={trip} day={activeDay} onDay={onDay} />
-      ) : null}
+      <nav className="dock" aria-label="主要畫面">
+        {[
+          ["overview", "總覽"],
+          ["days", "每日"],
+          ["transport", "交通"],
+          ["guides", "指南"],
+        ].map(([id, label]) => (
+          <button key={id} type="button" aria-selected={rootTab === id} onClick={() => openDock(id)}>
+            {label}
+          </button>
+        ))}
+      </nav>
       {lightbox ? (
         <div className="lightbox" onClick={() => setLightbox("")} role="presentation">
           <img src={lightbox} alt="" />
@@ -725,139 +825,94 @@ function GuidePane({ html }: { html: string }) {
   );
 }
 
-function DayPane({
+function DayScreen({
   trip,
   day,
   onDay,
+  onSpot,
 }: {
   trip: TripBook;
   day: TripDay;
   onDay: (id: string) => void;
+  onSpot: (index: number) => void;
 }) {
-  const rationale = trip.rationales.find((item) => item.city && item.city === day.city);
-  const stripRef = useRef<HTMLDivElement>(null);
-  const [openAll, setOpenAll] = useState(false);
-  const [openSpots, setOpenSpots] = useState<Record<string, boolean>>({});
   const index = trip.days.findIndex((item) => item.id === day.id);
-
-  useEffect(() => {
-    setOpenAll(false);
-    setOpenSpots({});
-    const current = stripRef.current?.querySelector('[aria-pressed="true"]');
-    current?.scrollIntoView({ inline: "center", block: "nearest" });
-  }, [day.id]);
-
+  const rationale = trip.rationales.find((item) => item.city && item.city === day.city);
   return (
-    <>
-      <section className="card day-switch">
-        <div className="day-meta">
-          <h2>
-            第 {index + 1} / {trip.days.length} 日
-          </h2>
-          <span className={`chip city-${day.city}`}>{cityLabel(day.city)}</span>
-        </div>
-        <div className="pills" ref={stripRef} role="tablist" aria-label="日期">
-          {trip.days.map((item) => {
-            const chip = dayChip(item);
-            return (
-              <button
-                key={item.id}
-                className={`pill city-${item.city}`}
-                type="button"
-                aria-pressed={item.id === day.id}
-                onClick={() => onDay(item.id)}
-              >
-                <span className="pill-num">{chip.num}</span>
-                <span className="pill-hint">{chip.hint}</span>
-              </button>
-            );
-          })}
-        </div>
-      </section>
-      {rationale ? (
-        <details className="card rationale">
-          <summary>點解咁排</summary>
-          <div className="rationale-body" dangerouslySetInnerHTML={{ __html: rationale.html }} />
-        </details>
-      ) : null}
-      <section className="card">
-        <h3 id="day-title">{day.title}</h3>
-        <nav className="jumps" aria-label="今日章節">
-          {day.images.length ? <a href="#day-photos">相片</a> : null}
-          {day.walkHtml ? <a href="#day-walk">步行</a> : null}
-          {day.foodHtml ? <a href="#day-food">美食</a> : null}
-          {day.spots.length ? <a href="#day-spots">景點 {day.spots.length}</a> : null}
-          <a href="#day-notes">筆記</a>
-        </nav>
-        {day.images.length ? (
-          <div className="dayimgs" id="day-photos">
-            {day.images.map((image) => (
-              <figure className="refimg" key={image.src}>
-                <a href={image.href || image.src} target="_blank" rel="noopener">
-                  <img src={image.src} alt={image.caption || day.title} loading="lazy" />
-                </a>
-                {image.caption ? <div className="attr">{image.caption}</div> : null}
-              </figure>
-            ))}
-          </div>
-        ) : null}
-        {day.walkHtml ? (
-          <div id="day-walk">
-            <Html html={day.walkHtml} />
-          </div>
-        ) : null}
-        {day.foodHtml ? (
-          <div id="day-food">
-            <Html html={day.foodHtml} />
-          </div>
-        ) : null}
-        {day.noteHtml ? <Html html={day.noteHtml} /> : null}
-        {day.leadHtml ? <Html html={day.leadHtml} /> : null}
-        {day.spots.length ? (
-          <div id="day-spots" className="spot-head">
-            <h4>景點 {day.spots.length}</h4>
-            <button className="btn ghost" type="button" onClick={() => setOpenAll((value) => !value)}>
-              {openAll ? "收起全部" : "展開全部"}
-            </button>
-          </div>
-        ) : null}
-        {day.spots.map((spot, spotIndex) => {
-          const key = `${spotIndex}-${spot.name}`;
-          const shown = openAll || Boolean(openSpots[key]);
+    <section className="screen">
+      <div className="daystrip" aria-label="日期">
+        {trip.days.map((item) => {
+          const chip = dayChip(item);
           return (
-            <div className="spot" key={key}>
-              <h3
-                className="spot-title"
-                onClick={() => {
-                  if (openAll) {
-                    const next: Record<string, boolean> = {};
-                    day.spots.forEach((item, itemIndex) => {
-                      next[`${itemIndex}-${item.name}`] = true;
-                    });
-                    next[key] = false;
-                    setOpenAll(false);
-                    setOpenSpots(next);
-                    return;
-                  }
-                  setOpenSpots((current) => ({ ...current, [key]: !current[key] }));
-                }}
-              >
-                <span className="spot-index">{spotIndex + 1}</span>
-                {spot.name}
-                <span className="spot-state">{shown ? "收起" : "展開"}</span>
-              </h3>
-              {shown ? (
-                <div className="spotbody">
-                  {spot.badge ? <p className="spot-badge-row"><span className={`badge ${spot.tone}`}>{spot.badge}</span></p> : null}
-                  <div dangerouslySetInnerHTML={{ __html: spot.html }} />
-                </div>
-              ) : null}
+            <div
+              key={item.id}
+              className={item.id === day.id ? "daychip on" : "daychip"}
+              onClick={() => onDay(item.id)}
+            >
+              {chip.num}
             </div>
           );
         })}
-        <DayNotes tripId={trip.id} dayId={day.id} />
-      </section>
-    </>
+      </div>
+      <p className="eyebrow">
+        第 {index + 1} / {trip.days.length} 日
+        {day.city ? ` · ${cityLabel(day.city)}` : ""}
+      </p>
+      <h1 className="screen-title">{day.title}</h1>
+      {day.images.length ? (
+        <div className="dayimgs">
+          {day.images.map((image) => (
+            <figure className="refimg" key={image.src}>
+              <a href={image.href || image.src} target="_blank" rel="noopener">
+                <img src={image.src} alt={image.caption || day.title} loading="lazy" />
+              </a>
+              {image.caption ? <div className="attr">{image.caption}</div> : null}
+            </figure>
+          ))}
+        </div>
+      ) : null}
+      <div className="reading">
+        {day.leadHtml ? <Html html={day.leadHtml} /> : null}
+        {day.walkHtml ? <Html html={day.walkHtml} /> : null}
+        {day.foodHtml ? <Html html={day.foodHtml} /> : null}
+        {day.noteHtml ? <Html html={day.noteHtml} /> : null}
+        {rationale ? <Html html={rationale.html} /> : null}
+      </div>
+      {day.spots.length ? (
+        <>
+          <h2 className="section-label">景點</h2>
+          <div className="sheet">
+            {day.spots.map((item, spotIndex) => (
+              <div className="navrow" key={`${item.name}-${spotIndex}`} onClick={() => onSpot(spotIndex)}>
+                <span className="navrow-num">{spotIndex + 1}</span>
+                <span className="navrow-main">
+                  <strong>{item.name}</strong>
+                  {item.badge ? <em>{item.badge}</em> : null}
+                </span>
+                <span className="navrow-go" aria-hidden="true">›</span>
+              </div>
+            ))}
+          </div>
+        </>
+      ) : null}
+      <DayNotes tripId={trip.id} dayId={day.id} />
+    </section>
+  );
+}
+
+function Transport({ trip }: { trip: TripBook }) {
+  return (
+    <section className="screen">
+      {trip.transport.introHtml ? <div className="reading" dangerouslySetInnerHTML={{ __html: trip.transport.introHtml }} /> : null}
+      {trip.transport.blocks.map((block) => {
+        const match = trip.days.find((day) => block.heading.startsWith(day.label.slice(0, 6)));
+        return (
+          <article className="reading block" id={match ? `leg-${match.id}` : undefined} key={block.heading}>
+            <div dangerouslySetInnerHTML={{ __html: block.html }} />
+          </article>
+        );
+      })}
+    </section>
   );
 }
 
@@ -891,40 +946,6 @@ function DayNav({
         <ChevronRight size={18} aria-hidden="true" />
       </button>
     </nav>
-  );
-}
-
-function Transport({ trip, onJump }: { trip: TripBook; onJump: (id: string) => void }) {
-  return (
-    <>
-      {trip.days.length ? (
-        <div className="pills transport-jump">
-          {trip.days.map((day) => {
-            const chip = dayChip(day);
-            return (
-              <button key={day.id} className="pill" type="button" onClick={() => onJump(day.id)}>
-                <span className="pill-num">{chip.num}</span>
-                <span className="pill-hint">交通</span>
-              </button>
-            );
-          })}
-        </div>
-      ) : null}
-      {trip.transport.introHtml ? (
-        <section className="card" dangerouslySetInnerHTML={{ __html: trip.transport.introHtml }} />
-      ) : null}
-      {trip.transport.blocks.map((block) => {
-        const match = trip.days.find((day) => block.heading.startsWith(day.label.slice(0, 6)));
-        return (
-          <section
-            className="card"
-            id={match ? `leg-${match.id}` : undefined}
-            key={block.heading}
-            dangerouslySetInnerHTML={{ __html: block.html }}
-          />
-        );
-      })}
-    </>
   );
 }
 
