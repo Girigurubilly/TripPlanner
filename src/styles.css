@@ -1429,10 +1429,39 @@ a[data-goto] {
 .fold .reading {
   padding: 0 14px 8px;
 }
-.rationale-foot {
+.why {
   margin-top: 18px;
-  padding-top: 8px;
-  border-top: 1px dashed var(--line);
+  padding: 14px 14px 6px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+}
+.why h2 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+.why-summary {
+  margin: 4px 0 8px;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+.why ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.why li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 0;
+  border-top: 1px solid var(--line);
+  line-height: 1.55;
+}
+.why-day {
+  color: var(--teal);
+  font-size: 0.82rem;
+  font-weight: 700;
 }
 .daychip.on {
   background: var(--navy);

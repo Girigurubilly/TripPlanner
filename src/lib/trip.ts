@@ -28,6 +28,16 @@ export type TripDay = {
   spots: TripSpot[];
 };
 
+export type RationalePoint = { label: string; text: string };
+
+export type TripRationale = {
+  city: string;
+  title: string;
+  summary: string;
+  points: RationalePoint[];
+  html: string;
+};
+
 export type TripGuide = {
   id: string;
   label: string;
@@ -43,7 +53,7 @@ export type TripBook = {
   tagline: string;
   nav: { id: string; label: string }[];
   overviewHtml: string;
-  rationales: { city: string; html: string }[];
+  rationales: TripRationale[];
   days: TripDay[];
   transport: {
     introHtml: string;
@@ -219,6 +229,49 @@ function sanitizeHtml(html: string): string {
   return doc.body.innerHTML;
 }
 
+function rationalePlain(html: string): string {
+  if (typeof DOMParser !== "undefined") {
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    return (doc.body.textContent || "").replace(/\s+/g, " ").trim();
+  }
+  return html
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&/g, "&")
+    .replace(/&#x27;/g, "'")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function rationaleChunks(body: string): string[] {
+  const date = "Day\\s*\\d+|Dec\\s*\\d+|Nov\\s*\\d+|Oct\\s*\\d+|\\d{1,2}\\/\\d{1,2}";
+  const byDateBreak = body.split(new RegExp(`；(?=\\s*(?:${date}))`)).map((part) => part.trim()).filter(Boolean);
+  if (byDateBreak.length > 1) return byDateBreak;
+  return body.split("。").map((part) => part.trim()).filter(Boolean);
+}
+
+export function shapeRationale(html: string): { title: string; summary: string; points: RationalePoint[] } {
+  let body = rationalePlain(html).replace(/^點解咁排（[^）]*）\s*/, "");
+  let summary = "";
+  const colon = body.indexOf("：");
+  const firstDate = body.search(/Day\s*\d|Dec\s*\d|Nov\s*\d|Oct\s*\d|\d{1,2}\/\d{1,2}/);
+  if (colon > 0 && (firstDate < 0 || colon < firstDate)) {
+    summary = body.slice(0, colon).replace(/排嘅$/, "").replace(/^成個.+?係按/, "按").replace(/\s+/g, "").trim();
+    body = body.slice(colon + 1).trim();
+  }
+  const points = rationaleChunks(body).map((chunk) => {
+    const matched = chunk.match(/^(Day\s*\d+|Dec\s*\d{1,2}(?:（[^）]+）)?|Nov\s*\d{1,2}(?:（[^）]+）)?|Oct\s*\d{1,2}(?:（[^）]+）)?|\d{1,2}\/\d{1,2})/);
+    if (!matched) return { label: "", text: chunk };
+    const label = matched[1].replace(/\s+/g, "").replace(/^(Day)(\d)/, "$1 $2");
+    const text = chunk
+      .slice(matched[0].length)
+      .replace(/^[（(][^）)]{0,16}[）)]/, "")
+      .replace(/^[：:\s]+/, "")
+      .trim();
+    return { label, text };
+  });
+  return { title: "點解咁排", summary, points: points.filter((point) => point.text) };
+}
+
 function cleanFact(value: string): string {
   return value.replace(/\s+/g, " ").replace(/^[：:\s]+/, "").trim();
 }
@@ -379,7 +432,22 @@ export function parseTripBook(value: unknown): TripBook {
     overviewHtml: sanitizeHtml(asString(raw.overviewHtml)),
     rationales: rationalesRaw.map((item) => {
       const rationale = (item || {}) as Record<string, unknown>;
-      return { city: asString(rationale.city), html: sanitizeHtml(asString(rationale.html)) };
+      const html = sanitizeHtml(asString(rationale.html));
+      const shaped = shapeRationale(html);
+      const given = Array.isArray(rationale.points) ? rationale.points : [];
+      const points = given
+        .map((point) => {
+          const row = (point || {}) as Record<string, unknown>;
+          return { label: asString(row.label).trim(), text: asString(row.text).trim() };
+        })
+        .filter((point) => point.text);
+      return {
+        city: asString(rationale.city),
+        title: asString(rationale.title).trim() || shaped.title,
+        summary: asString(rationale.summary).trim() || shaped.summary,
+        points: points.length ? points : shaped.points,
+        html,
+      };
     }),
     days: daysRaw.map(parseDay),
     transport: {

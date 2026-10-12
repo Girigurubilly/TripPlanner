@@ -1459,9 +1459,22 @@ function DayScreen({
       ) : null}
       <DayNotes tripId={trip.id} dayId={day.id} />
       {rationale ? (
-        <div className="reading rationale-foot">
-          <Html html={rationale.html} />
-        </div>
+        <section className="why">
+          <h2>{rationale.title || "點解咁排"}</h2>
+          {rationale.summary ? <p className="why-summary">{rationale.summary}</p> : null}
+          {rationale.points.length ? (
+            <ul>
+              {rationale.points.map((point) => (
+                <li key={`${point.label}-${point.text.slice(0, 12)}`}>
+                  {point.label ? <span className="why-day">{point.label}</span> : null}
+                  <span>{point.text}</span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <Html html={rationale.html} />
+          )}
+        </section>
       ) : null}
     </section>
   );
