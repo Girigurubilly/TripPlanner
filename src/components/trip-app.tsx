@@ -416,6 +416,15 @@ function Book({
 
   const openGuide = guideIds.has(activeTab) && !eatIds.has(activeTab) ? trip.guides.find((guide) => guide.id === activeTab) : undefined;
   const openEat = eatIds.has(activeTab) ? trip.guides.find((guide) => guide.id === activeTab) || eatGuides[0] : undefined;
+  const places = useMemo(() => {
+    const names: string[] = [];
+    for (const day of trip.days) {
+      const label = cityLabel(day.city);
+      if (label && !names.includes(label)) names.push(label);
+    }
+    return names;
+  }, [trip]);
+  const anchored = useMemo(() => placeAnchors(shownHtml(openEat?.html || ""), places), [openEat, places]);
   const guideParsed = useMemo(() => (openGuide ? guideSlices(openGuide.html) : null), [openGuide]);
   const topic = guideParsed && topicAt !== null ? guideParsed.slices[topicAt] : undefined;
   const topicHtml = useMemo(() => (topic ? presentSlice(topic.html) : ""), [topic]);
@@ -492,7 +501,7 @@ function Book({
             <h1 className="screen-title">{trip.title}</h1>
             {trip.subtitle ? <p className="lede">{trip.subtitle}</p> : null}
             {trip.tagline ? <p className="lede">{trip.tagline}</p> : null}
-            <Html html={trip.overviewHtml} />
+            <Overview html={trip.overviewHtml} />
           </article>
         ) : null}
 
@@ -530,7 +539,20 @@ function Book({
                 </div>
               ))}
             </div>
-            <article className="reading" dangerouslySetInnerHTML={{ __html: shownHtml(openEat.html) }} />
+            {anchored.anchors.length ? (
+              <div className="daystrip anchorstrip">
+                {anchored.anchors.map((item) => (
+                  <div
+                    key={item.id}
+                    className="daychip"
+                    onClick={() => document.getElementById(item.id)?.scrollIntoView({ behavior: "smooth", block: "start" })}
+                  >
+                    {item.label}
+                  </div>
+                ))}
+              </div>
+            ) : null}
+            <article className="reading" dangerouslySetInnerHTML={{ __html: anchored.html }} />
           </section>
         ) : null}
 
@@ -605,6 +627,102 @@ function Book({
 
 function Html({ html }: { html: string }) {
   return <div dangerouslySetInnerHTML={{ __html: shownHtml(html) }} />;
+}
+
+function ownText(el: HTMLElement): string {
+  return [...el.childNodes]
+    .filter((node) => node.nodeType === Node.TEXT_NODE)
+    .map((node) => node.textContent || "")
+    .join("")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function placeAnchors(html: string, places: string[]): { html: string; anchors: { id: string; label: string }[] } {
+  if (!html || typeof DOMParser === "undefined") return { html, anchors: [] };
+  const doc = new DOMParser().parseFromString(`<div id="place-root">${html}</div>`, "text/html");
+  const root = doc.getElementById("place-root");
+  if (!root) return { html, anchors: [] };
+  const anchors: { id: string; label: string }[] = [];
+  const used = new Set<string>();
+  for (const head of root.querySelectorAll("h2, h3")) {
+    if (!(head instanceof HTMLElement)) continue;
+    const text = ownText(head);
+    const place = places.find((name) => text === name || text.startsWith(name));
+    if (!place || used.has(place)) continue;
+    used.add(place);
+    const id = `place-${anchors.length}`;
+    head.id = id;
+    anchors.push({ id, label: place });
+  }
+  return { html: root.innerHTML, anchors };
+}
+
+function splitOverview(html: string): { lead: string; first: string; rest: { title: string; html: string }[] } {
+  if (!html || typeof DOMParser === "undefined") return { lead: "", first: html, rest: [] };
+  const doc = new DOMParser().parseFromString(`<div id="ov-root">${html}</div>`, "text/html");
+  const root = doc.getElementById("ov-root");
+  const heads = [...(root?.querySelectorAll("h2") || [])];
+  if (!root || heads.length < 2) return { lead: "", first: html, rest: [] };
+  const sections = heads.map((head) => {
+    const nodes: Node[] = [head];
+    let sib = head.nextSibling;
+    while (sib) {
+      if (sib instanceof HTMLElement && sib.tagName === "H2") break;
+      nodes.push(sib);
+      sib = sib.nextSibling;
+    }
+    const wrap = doc.createElement("div");
+    nodes.forEach((node) => wrap.append(node.cloneNode(true)));
+    return { title: ownText(head) || (head.textContent || "").trim(), html: wrap.innerHTML };
+  });
+  const lead = root.cloneNode(true) as HTMLElement;
+  const firstHead = lead.querySelector("h2");
+  if (firstHead?.parentElement) {
+    let sib: ChildNode | null = firstHead;
+    while (sib) {
+      const next: ChildNode | null = sib.nextSibling;
+      sib.remove();
+      sib = next;
+    }
+  }
+  const first = sections[0];
+  return { lead: lead.innerHTML, first: first?.html || "", rest: sections.slice(1).map((section) => {
+    const part = new DOMParser().parseFromString(`<div>${section.html}</div>`, "text/html");
+    part.querySelector("h2")?.remove();
+    return { title: section.title, html: part.body.innerHTML };
+  }) };
+}
+
+function FoldSection({ title, html }: { title: string; html: string }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (open && ref.current) labelTables(ref.current);
+  }, [open]);
+  return (
+    <section className="fold">
+      <div className="fold-bar" onClick={() => setOpen((value) => !value)}>
+        <strong>{title}</strong>
+        <span>{open ? "收起" : "展開"}</span>
+      </div>
+      {open ? <div className="reading" ref={ref} dangerouslySetInnerHTML={{ __html: html }} /> : null}
+    </section>
+  );
+}
+
+function Overview({ html }: { html: string }) {
+  const parts = useMemo(() => splitOverview(shownHtml(html)), [html]);
+  if (!parts.rest.length) return <Html html={html} />;
+  return (
+    <>
+      {parts.lead ? <div className="reading" dangerouslySetInnerHTML={{ __html: parts.lead }} /> : null}
+      <div className="reading" dangerouslySetInnerHTML={{ __html: parts.first }} />
+      {parts.rest.map((section) => (
+        <FoldSection key={section.title} title={section.title} html={section.html} />
+      ))}
+    </>
+  );
 }
 
 function shownHtml(html: string): string {
@@ -932,7 +1050,6 @@ function DayScreen({
         {day.walkHtml ? <Html html={day.walkHtml} /> : null}
         {day.foodHtml ? <Html html={day.foodHtml} /> : null}
         {day.noteHtml ? <Html html={day.noteHtml} /> : null}
-        {rationale ? <Html html={rationale.html} /> : null}
       </div>
       {day.spots.length ? (
         <>
@@ -952,16 +1069,37 @@ function DayScreen({
         </>
       ) : null}
       <DayNotes tripId={trip.id} dayId={day.id} />
+      {rationale ? (
+        <div className="reading rationale-foot">
+          <Html html={rationale.html} />
+        </div>
+      ) : null}
     </section>
   );
 }
 
 function Transport({ trip }: { trip: TripBook }) {
+  const jumps = trip.days.filter((day) =>
+    trip.transport.blocks.some((block) => block.heading.startsWith(day.label.slice(0, 6))),
+  );
   return (
     <section className="screen">
+      {jumps.length ? (
+        <div className="daystrip anchorstrip">
+          {jumps.map((day) => (
+            <div
+              key={day.id}
+              className="daychip"
+              onClick={() => document.getElementById(`leg-${day.id}`)?.scrollIntoView({ behavior: "smooth", block: "start" })}
+            >
+              {dayChip(day).num}
+            </div>
+          ))}
+        </div>
+      ) : null}
       {trip.transport.introHtml ? <div className="reading" dangerouslySetInnerHTML={{ __html: trip.transport.introHtml }} /> : null}
       {trip.transport.blocks.map((block) => {
-        const match = trip.days.find((day) => block.heading.startsWith(day.label.slice(0, 6)));
+        const match = jumps.find((day) => block.heading.startsWith(day.label.slice(0, 6)));
         return (
           <article className="reading block" id={match ? `leg-${match.id}` : undefined} key={block.heading}>
             <div dangerouslySetInnerHTML={{ __html: block.html }} />

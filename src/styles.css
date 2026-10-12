@@ -1272,17 +1272,63 @@ details.spot,
   overflow-x: auto;
   padding: 4px 0 12px;
 }
+.daystrip.anchorstrip {
+  position: sticky;
+  top: 56px;
+  z-index: 25;
+  background: var(--paper);
+  margin: 0 -16px 12px;
+  padding: 8px 16px;
+}
 .daychip {
   flex: 0 0 auto;
   min-width: 44px;
   height: 44px;
-  padding: 0 12px;
+  padding: 0 14px;
   border-radius: 999px;
   background: #fff;
   border: 1px solid var(--line);
   text-align: center;
   line-height: 44px;
   font-weight: 700;
+  white-space: nowrap;
+}
+.reading h2,
+.reading h3,
+.block {
+  scroll-margin-top: 116px;
+}
+.fold {
+  margin: 12px 0;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  overflow: hidden;
+}
+.fold-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 52px;
+  padding: 12px 14px;
+}
+.fold-bar strong {
+  font-size: 1.02rem;
+  line-height: 1.4;
+}
+.fold-bar span {
+  flex: 0 0 auto;
+  color: var(--teal);
+  font-weight: 700;
+}
+.fold .reading {
+  padding: 0 14px 8px;
+}
+.rationale-foot {
+  margin-top: 18px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--line);
 }
 .daychip.on {
   background: var(--navy);
