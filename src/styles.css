@@ -1468,6 +1468,12 @@ a[data-goto] {
   color: #fff;
   border-color: var(--navy);
 }
+.sheet-label {
+  margin: 16px 2px 8px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--teal);
+}
 .sheet {
   background: #fff;
   border: 1px solid var(--line);

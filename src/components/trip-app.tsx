@@ -548,6 +548,7 @@ function Book({
   const [checkTick, setCheckTick] = useState(0);
   const scrollDay = useRef("");
   const pendingSpot = useRef<number | undefined>(undefined);
+  const pendingTopic = useRef<number | undefined>(undefined);
   const scrollPlace = useRef("");
   const mainRef = useRef<HTMLElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -630,7 +631,12 @@ function Book({
   }, [activeDay?.id]);
 
   useEffect(() => {
-    setTopicAt(null);
+    if (pendingTopic.current === undefined) {
+      setTopicAt(null);
+      return;
+    }
+    setTopicAt(pendingTopic.current);
+    pendingTopic.current = undefined;
   }, [activeTab, trip.id]);
 
   useEffect(() => {
@@ -654,6 +660,26 @@ function Book({
     return names;
   }, [trip]);
   const anchored = useMemo(() => placeAnchors(shownHtml(openEat?.html || ""), places), [openEat, places]);
+  const guideMenus = useMemo(() => {
+    const skip = new Set(
+      trip.guides
+        .filter((guide) => guide.id === "food" || guide.id === "souvenir" || /美食|手信/.test(guide.label))
+        .map((guide) => guide.id),
+    );
+    return trip.guides
+      .filter((guide) => !skip.has(guide.id))
+      .map((guide) => {
+        const all = guideSlices(guide.html).slices;
+        const slices = all.flatMap((slice, index) => {
+          const title = chipTitle(slice.title);
+          if (!title || title === chipTitle(guide.label) || /相片|Wikimedia|commons/i.test(title)) return [];
+          return [{ title, index }];
+        });
+        const shown = slices.length ? slices : all.map((slice, index) => ({ title: chipTitle(slice.title) || chipTitle(guide.label), index }));
+        return { guide, slices: shown };
+      })
+      .filter((menu) => menu.slices.length);
+  }, [trip]);
   const guideParsed = useMemo(() => (openGuide ? guideSlices(openGuide.html) : null), [openGuide]);
   const topic = guideParsed && topicAt !== null ? guideParsed.slices[topicAt] : undefined;
   const topicHtml = useMemo(() => (topic ? presentSlice(topic.html) : ""), [topic]);
@@ -696,7 +722,9 @@ function Book({
       return;
     }
     if (topicAt !== null) {
+      pendingTopic.current = undefined;
       setTopicAt(null);
+      onTab("guides");
       return;
     }
     if (rootTab === "guides" && openGuide) {
@@ -841,16 +869,30 @@ function Book({
         {!searching && !spot && rootTab === "guides" && !openGuide ? (
           <section className="screen">
             <h1 className="screen-title">指南</h1>
-            <div className="sheet">
-              {trip.guides.filter((guide) => !eatIds.has(guide.id)).map((guide) => (
-                <div className="navrow" key={guide.id} onClick={() => openDock(guide.id)}>
-                  <span className="navrow-main">
-                    <strong>{guide.label}</strong>
-                  </span>
-                  <span className="navrow-go" aria-hidden="true">›</span>
+            {guideMenus.map((menu) => (
+              <div key={menu.guide.id}>
+                <h2 className="sheet-label">{chipTitle(menu.guide.label)}</h2>
+                <div className="sheet">
+                  {menu.slices.map((item) => (
+                      <div
+                        className="navrow"
+                        key={`${menu.guide.id}-${item.index}`}
+                        onClick={() => {
+                          pendingTopic.current = item.index;
+                          setSpotAt(null);
+                          onTab(menu.guide.id);
+                          window.scrollTo({ top: 0 });
+                        }}
+                      >
+                        <span className="navrow-main">
+                          <strong>{item.title}</strong>
+                        </span>
+                        <span className="navrow-go" aria-hidden="true">›</span>
+                      </div>
+                    ))}
                 </div>
-              ))}
-            </div>
+              </div>
+            ))}
           </section>
         ) : null}
 
