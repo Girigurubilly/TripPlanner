@@ -165,8 +165,8 @@ export function TripApp() {
       <div className="app">
         <header className="topbar">
           <div className="brand">
-            <strong>行程書</strong>
-            <span>只存在呢部瀏覽器</span>
+            <strong>行程</strong>
+            <span>只存在呢部手機</span>
           </div>
           <button className="btn primary" type="button" onClick={() => fileRef.current?.click()}>
             <Upload size={18} aria-hidden="true" />
@@ -199,15 +199,15 @@ export function TripApp() {
                 onDrop={onDrop}
               >
                 <Upload size={28} aria-hidden="true" />
-                <strong>上傳行程 JSON</strong>
-                <span>內容同筆記留喺呢部機，可以再同步去 Google Drive</span>
+                <strong>加入行程</strong>
+                <span>上傳 JSON。內容留喺呢部手機，可以同步去 Google Drive</span>
               </button>
             </section>
           ) : (
             <section>
               <div className="lib-head">
-                <h1>行程庫</h1>
-                <p className="muted">撳卡片打開。同一個 id 再上傳會更新內容，筆記保留。</p>
+                <h1>我的行程</h1>
+                <p className="muted">撳一張卡打開。同一個 id 再上傳會更新內容，筆記保留。</p>
               </div>
               <div className="trip-grid">
                 {trips.map((trip) => (
@@ -235,7 +235,7 @@ export function TripApp() {
           <p className="prompt-row">
             <button className="prompt-link" type="button" onClick={() => void copyPrompt()}>
               <Copy size={16} aria-hidden="true" />
-              複製 AI 行程提示詞
+              用 AI 寫行程
             </button>
           </p>
           {promptFallback ? (
@@ -245,14 +245,27 @@ export function TripApp() {
           <details className="format">
             <summary>行程檔格式</summary>
             <p className="tiny">
-              schemaVersion 必須係 1。id 相同會覆蓋內容，筆記按 id 保留。可以係單一物件，或者一個行程陣列。
+              schemaVersion 必須係 1。景點唔好再用 details 包住。時間、地址、費用用獨立欄位。
             </p>
             <pre>{`{
   "schemaVersion": 1,
-  "id": "my-trip",
-  "title": "旅行計畫",
-  "days": [{ "id": "d1", "label": "Day 1", "title": "到達", "spots": [] }],
-  "guides": [{ "id": "food", "label": "美食", "html": "" }]
+  "id": "osaka-2027-04",
+  "title": "大阪四日",
+  "days": [{
+    "id": "d1",
+    "city": "osaka",
+    "label": "4/2（五）",
+    "title": "抵達",
+    "spots": [{
+      "name": "難波散步",
+      "badge": "輕鬆",
+      "tone": "ok",
+      "hours": "全日",
+      "address": "難波",
+      "price": "免費",
+      "html": "<p>停留約 60 分鐘。</p>"
+    }]
+  }]
 }`}</pre>
           </details>
         </main>
@@ -492,6 +505,13 @@ function Book({
         {spot && activeDay ? (
           <article className="screen reading">
             {spot.badge ? <p className="spot-badge-row"><span className={`badge ${spot.tone}`}>{spot.badge}</span></p> : null}
+            {spot.hours || spot.address || spot.price ? (
+              <dl className="facts">
+                {spot.hours ? <div><dt>時間</dt><dd>{spot.hours}</dd></div> : null}
+                {spot.address ? <div><dt>地點</dt><dd>{spot.address}</dd></div> : null}
+                {spot.price ? <div><dt>費用</dt><dd>{spot.price}</dd></div> : null}
+              </dl>
+            ) : null}
             <div dangerouslySetInnerHTML={{ __html: spotBody }} />
           </article>
         ) : null}

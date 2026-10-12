@@ -3,7 +3,7 @@ import { AuthProvider } from "@/lib/auth/provider";
 import { PreviewHostBridge } from "@/components/preview-host-bridge";
 import appCss from "../styles.css?url";
 
-const APP_NAME = "行程書";
+const APP_NAME = "行程";
 
 const base = import.meta.env.BASE_URL;
 

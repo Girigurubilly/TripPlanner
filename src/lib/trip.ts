@@ -9,6 +9,9 @@ export type TripSpot = {
   name: string;
   badge: string;
   tone: string;
+  hours: string;
+  address: string;
+  price: string;
   html: string;
 };
 
@@ -52,8 +55,17 @@ export type TripBook = {
 
 const CITY_LABEL: Record<string, string> = {
   milan: "米蘭",
+  milano: "米蘭",
   florence: "佛羅倫斯",
+  firenze: "佛羅倫斯",
   madrid: "馬德里",
+  osaka: "大阪",
+  kyoto: "京都",
+  tokyo: "東京",
+  nara: "奈良",
+  kobe: "神戶",
+  hongkong: "香港",
+  hk: "香港",
 };
 
 const TRIPS_KEY = "tripbooks.v1";
@@ -64,7 +76,9 @@ const EDIT_KEY = "tripbook-local-edited";
 export type NoteMap = Record<string, Record<string, string>>;
 
 export function cityLabel(city: string): string {
-  return CITY_LABEL[city] || city;
+  const key = city.trim().toLowerCase();
+  if (CITY_LABEL[key]) return CITY_LABEL[key];
+  return city.trim();
 }
 
 export function tripStats(trip: TripBook): string {
@@ -81,11 +95,23 @@ function asString(value: unknown, fallback = ""): string {
 }
 
 function sanitizeHtml(html: string): string {
-  if (!html || typeof DOMParser === "undefined") return html;
-  const doc = new DOMParser().parseFromString(html, "text/html");
+  if (!html) return "";
+  const linked = html.replace(
+    /\[([^\]\n]{1,120})\]\((https?:\/\/[^)\s]+)\)/g,
+    '<a href="$2" target="_blank" rel="noopener">$1</a>',
+  );
+  if (typeof DOMParser === "undefined") return linked;
+  const doc = new DOMParser().parseFromString(linked, "text/html");
   doc.querySelectorAll("script,iframe,object,embed,link,meta,style").forEach((node) => {
     node.remove();
   });
+  for (const details of [...doc.querySelectorAll("details")]) {
+    details.querySelector("summary")?.remove();
+    const parent = details.parentNode;
+    if (!parent) continue;
+    while (details.firstChild) parent.insertBefore(details.firstChild, details);
+    details.remove();
+  }
   doc.querySelectorAll("*").forEach((el) => {
     for (const attr of [...el.attributes]) {
       const name = attr.name.toLowerCase();
@@ -96,10 +122,23 @@ function sanitizeHtml(html: string): string {
       }
       if ((name === "href" || name === "src") && /^javascript:/i.test(value)) {
         el.removeAttribute(attr.name);
+        continue;
+      }
+      if ((name === "href" || name === "src") && value.includes("?")) {
+        const cut = value.indexOf("?", value.indexOf("?") + 1);
+        if (cut > 0) el.setAttribute(attr.name, value.slice(0, cut));
       }
     }
   });
   return doc.body.innerHTML;
+}
+
+function normalizeTone(tone: string): string {
+  const value = tone.trim().toLowerCase();
+  if (value === "ok" || value === "yes" || value === "go") return "ok";
+  if (value === "no" || value === "closed" || value === "stop") return "no";
+  if (value === "na" || value === "optional" || value === "maybe") return "na";
+  return "";
 }
 
 function parseDay(value: unknown, index: number): TripDay {
@@ -128,12 +167,23 @@ function parseDay(value: unknown, index: number): TripDay {
     }),
     spots: spotsRaw.map((spot) => {
       const item = (spot || {}) as Record<string, unknown>;
-      const tone = asString(item.tone);
+      const rawHtml = asString(item.html);
+      let name = asString(item.name).trim();
+      let badge = asString(item.badge).trim();
+      if ((!name || !badge) && typeof DOMParser !== "undefined" && rawHtml.includes("<summary")) {
+        const doc = new DOMParser().parseFromString(rawHtml, "text/html");
+        const summary = doc.querySelector("summary");
+        if (!name) name = summary?.querySelector(".spotname")?.textContent?.trim() || "";
+        if (!badge) badge = summary?.querySelector(".badge")?.textContent?.trim() || "";
+      }
       return {
-        name: asString(item.name),
-        badge: asString(item.badge),
-        tone: tone === "ok" || tone === "no" || tone === "na" ? tone : "",
-        html: sanitizeHtml(asString(item.html)),
+        name,
+        badge,
+        tone: normalizeTone(asString(item.tone)),
+        hours: asString(item.hours).trim(),
+        address: asString(item.address).trim(),
+        price: asString(item.price).trim(),
+        html: sanitizeHtml(rawHtml),
       };
     }),
   };
