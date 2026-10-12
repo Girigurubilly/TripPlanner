@@ -395,9 +395,12 @@ function Book({
     }
   }
 
+  const eatGuides = trip.guides.filter((guide) => guide.id === "food" || guide.id === "souvenir" || /美食|手信/.test(guide.label));
+  const eatIds = new Set(eatGuides.map((guide) => guide.id));
   const guideIds = new Set(trip.guides.map((guide) => guide.id));
-  const rootTab =
-    guideIds.has(activeTab) || activeTab === "guides"
+  const rootTab = eatIds.has(activeTab)
+    ? "eat"
+    : guideIds.has(activeTab) || activeTab === "guides"
       ? "guides"
       : activeTab === "days" || activeTab === "transport"
         ? activeTab
@@ -411,16 +414,18 @@ function Book({
     setTopicAt(null);
   }, [activeTab, trip.id]);
 
-  const openGuide = guideIds.has(activeTab) ? trip.guides.find((guide) => guide.id === activeTab) : undefined;
+  const openGuide = guideIds.has(activeTab) && !eatIds.has(activeTab) ? trip.guides.find((guide) => guide.id === activeTab) : undefined;
+  const openEat = eatIds.has(activeTab) ? trip.guides.find((guide) => guide.id === activeTab) || eatGuides[0] : undefined;
   const guideParsed = useMemo(() => (openGuide ? guideSlices(openGuide.html) : null), [openGuide]);
   const topic = guideParsed && topicAt !== null ? guideParsed.slices[topicAt] : undefined;
   const topicHtml = useMemo(() => (topic ? presentSlice(topic.html) : ""), [topic]);
   const spot = activeDay && spotAt !== null ? activeDay.spots[spotAt] : undefined;
-
+  const spotBody = useMemo(() => (spot ? spotHtml(spot.html, spot.name) : ""), [spot]);
   let screenTitle = trip.title;
   if (spot) screenTitle = spot.name;
   else if (rootTab === "days" && activeDay) screenTitle = activeDay.label || activeDay.title;
   else if (rootTab === "transport") screenTitle = "交通";
+  else if (openEat) screenTitle = "美食手信";
   else if (topic) screenTitle = topic.title;
   else if (openGuide) screenTitle = openGuide.label;
   else if (rootTab === "guides") screenTitle = "指南";
@@ -478,7 +483,7 @@ function Book({
         {spot && activeDay ? (
           <article className="screen reading">
             {spot.badge ? <p className="spot-badge-row"><span className={`badge ${spot.tone}`}>{spot.badge}</span></p> : null}
-            <div dangerouslySetInnerHTML={{ __html: spot.html }} />
+            <div dangerouslySetInnerHTML={{ __html: spotBody }} />
           </article>
         ) : null}
 
@@ -509,11 +514,31 @@ function Book({
 
         {!spot && rootTab === "transport" ? <Transport trip={trip} /> : null}
 
+        {!spot && rootTab === "eat" && openEat ? (
+          <section className="screen">
+            <div className="segment">
+              {eatGuides.map((guide) => (
+                <div
+                  key={guide.id}
+                  className={guide.id === openEat.id ? "on" : ""}
+                  onClick={() => {
+                    onTab(guide.id);
+                    window.scrollTo({ top: 0 });
+                  }}
+                >
+                  {guide.label}
+                </div>
+              ))}
+            </div>
+            <article className="reading" dangerouslySetInnerHTML={{ __html: shownHtml(openEat.html) }} />
+          </section>
+        ) : null}
+
         {!spot && rootTab === "guides" && !openGuide ? (
           <section className="screen">
             <h1 className="screen-title">指南</h1>
             <div className="sheet">
-              {trip.guides.map((guide) => (
+              {trip.guides.filter((guide) => !eatIds.has(guide.id)).map((guide) => (
                 <div className="navrow" key={guide.id} onClick={() => openDock(guide.id)}>
                   <span className="navrow-main">
                     <strong>{guide.label}</strong>
@@ -560,9 +585,10 @@ function Book({
           ["overview", "總覽"],
           ["days", "每日"],
           ["transport", "交通"],
+          [eatGuides[0]?.id || "food", "美食"],
           ["guides", "指南"],
-        ].map(([id, label]) => (
-          <button key={id} type="button" aria-selected={rootTab === id} onClick={() => openDock(id)}>
+        ].filter(([id]) => id !== "food" || eatGuides.length).map(([id, label]) => (
+          <button key={label} type="button" aria-selected={rootTab === (eatIds.has(id) ? "eat" : id)} onClick={() => openDock(id)}>
             {label}
           </button>
         ))}
@@ -578,7 +604,37 @@ function Book({
 }
 
 function Html({ html }: { html: string }) {
-  return <div dangerouslySetInnerHTML={{ __html: html }} />;
+  return <div dangerouslySetInnerHTML={{ __html: shownHtml(html) }} />;
+}
+
+function shownHtml(html: string): string {
+  if (!html || typeof DOMParser === "undefined") return html;
+  const doc = new DOMParser().parseFromString(`<div id="shown-root">${html}</div>`, "text/html");
+  const root = doc.getElementById("shown-root");
+  if (!root) return html;
+  for (const details of [...root.querySelectorAll("details")]) {
+    details.querySelector("summary")?.remove();
+    const parent = details.parentNode;
+    if (!parent) continue;
+    while (details.firstChild) parent.insertBefore(details.firstChild, details);
+    details.remove();
+  }
+  return root.innerHTML;
+}
+
+function spotHtml(html: string, name: string): string {
+  const opened = shownHtml(html);
+  if (typeof DOMParser === "undefined") return opened;
+  const doc = new DOMParser().parseFromString(`<div id="spot-root">${opened}</div>`, "text/html");
+  const root = doc.getElementById("spot-root");
+  if (!root) return opened;
+  const key = name.replace(/\s+/g, "");
+  for (const el of [...root.querySelectorAll("h1, h2, h3, h4, p, .spotname, .badge")]) {
+    const text = (el.textContent || "").replace(/\s+/g, "");
+    if (!text) continue;
+    if (text === key || (key && text.includes(key) && text.length < key.length + 16)) el.remove();
+  }
+  return root.innerHTML;
 }
 
 type GuideSlice = { title: string; html: string };
