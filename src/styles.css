@@ -1100,6 +1100,7 @@ a[data-goto] {
   text-decoration: underline;
   text-underline-offset: 3px;
 }
+.search-hint {
   margin: 8px 2px 12px;
 }
 .booked-line {
