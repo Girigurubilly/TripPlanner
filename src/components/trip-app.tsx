@@ -773,8 +773,7 @@ function Book({
                 {spotView.price ? <div><dt>費用</dt><dd>{spotView.price}</dd></div> : null}
               </dl>
             ) : null}
-            <div dangerouslySetInnerHTML={{ __html: spotView?.brief || "" }} />
-            {spotView?.deep ? <SpotMore html={spotView.deep} /> : null}
+            <div dangerouslySetInnerHTML={{ __html: `${spotView?.brief || ""}${spotView?.deep || ""}` }} />
           </article>
         ) : null}
 
@@ -1136,20 +1135,6 @@ function presentSpot(spot: TripSpot): { hours: string; address: string; price: s
     if (!rule.nextElementSibling && !rule.previousElementSibling) rule.remove();
   });
   return { hours, address, price, brief: root.innerHTML, deep: deepParts.join("") };
-}
-
-function SpotMore({ html }: { html: string }) {
-  const [open, setOpen] = useState(false);
-  if (!html.trim()) return null;
-  return (
-    <section className="fold">
-      <div className="fold-bar" onClick={() => setOpen((value) => !value)}>
-        <strong>深度導覽</strong>
-        <span>{open ? "收起" : "展開"}</span>
-      </div>
-      {open ? <div className="reading" dangerouslySetInnerHTML={{ __html: html }} /> : null}
-    </section>
-  );
 }
 
 type GuideSlice = { title: string; html: string };
