@@ -80,7 +80,9 @@ function isBookingRow(text: string): boolean {
 }
 
 function isBookingLine(text: string): boolean {
-  return /已book|已預約|要預約|建議預約|必預約|強制.{0,8}預約/.test(text) || /^(航班|酒店|住宿)/.test(text);
+  if (/^(航班|酒店|住宿)/.test(text)) return true;
+  if (text.length > 80) return false;
+  return /要預約|已預約|建議預約|必預約|強制.{0,8}預約/.test(text);
 }
 
 function bookingBox(tripId: string, key: string, on: boolean, mark: Element): HTMLInputElement {
