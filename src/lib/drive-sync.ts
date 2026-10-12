@@ -9,12 +9,14 @@ import {
 import {
   exportChecks,
   exportNotes,
+  exportVisits,
   loadTrips,
   localEditedAt,
   replaceLibrary,
   type CheckMap,
   type NoteMap,
   type TripBook,
+  type VisitMap,
 } from "@/lib/trip";
 
 const PASS_KEY = "tripbook-drive-pass";
@@ -53,6 +55,7 @@ export type TripSnapshot = {
   trips: TripBook[];
   notes: NoteMap;
   checks?: CheckMap;
+  visits?: VisitMap;
 };
 
 export type SyncResult = "pulled" | "pushed" | "ok" | "offline" | "need-auth" | "need-pass" | "missing" | "fail";
@@ -82,6 +85,7 @@ export function exportSnapshot(): TripSnapshot {
     trips: loadTrips(),
     notes: exportNotes(),
     checks: exportChecks(),
+    visits: exportVisits(),
   };
 }
 
@@ -199,7 +203,7 @@ export async function syncTripDrive(): Promise<SyncResult> {
     return "pushed";
   }
   if (!localAt || (remoteAt && remoteAt > localAt)) {
-    replaceLibrary(decoded.trips, decoded.notes || {}, remoteAt || new Date().toISOString(), decoded.checks);
+    replaceLibrary(decoded.trips, decoded.notes || {}, remoteAt || new Date().toISOString(), decoded.checks, decoded.visits);
     return "pulled";
   }
   return "ok";

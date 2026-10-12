@@ -772,23 +772,31 @@ summary:focus-visible {
   font-weight: 650;
   letter-spacing: 0.04em;
 }
-.format {
-  margin-top: 18px;
-  background: var(--card);
+.stamp {
   border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  padding: 12px 14px;
-}
-.format summary {
-  cursor: pointer;
-  font-weight: 650;
-}
-.format pre {
-  overflow-x: auto;
+  background: #fff;
+  color: var(--muted);
+  border-radius: 999px;
+  padding: 4px 10px;
+  font: inherit;
   font-size: 0.78rem;
-  background: #f4efe6;
-  border-radius: 8px;
-  padding: 10px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+.stamp.on,
+.stamp-lg.on {
+  background: #e7f3ef;
+  color: var(--teal);
+  border-color: transparent;
+}
+.stamp-lg {
+  display: flex;
+  width: 100%;
+  justify-content: center;
+  margin: 0 0 12px;
+}
+.spotrow {
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
 }
 .status {
   margin: 12px 0 0;
@@ -1524,6 +1532,10 @@ a[data-goto] {
   line-height: 1;
 }
 .section-label {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
   margin: 18px 0 8px;
   font-size: 0.95rem;
   color: var(--muted);

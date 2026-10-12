@@ -25,6 +25,7 @@ import {
   loadChecks,
   loadTrips,
   loadUi,
+  loadVisits,
   mapLink,
   parseTripFile,
   saveNote,
@@ -34,7 +35,9 @@ import {
   tripStats,
   tripTiming,
   upsertTrips,
+  visitKey,
   writeCheck,
+  writeVisit,
   type TripBook,
   type TripSpot,
   type TripDay,
@@ -422,32 +425,6 @@ export function TripApp() {
             <textarea className="prompt-box" readOnly value={AI_TRIP_PROMPT} />
           ) : null}
           <DrivePanel onLibraryChange={() => setTrips(loadTrips())} />
-          <details className="format">
-            <summary>行程檔格式</summary>
-            <p className="tiny">
-              schemaVersion 必須係 1。景點唔好再用 details 包住。時間、地址、費用用獨立欄位。
-            </p>
-            <pre>{`{
-  "schemaVersion": 1,
-  "id": "osaka-2027-04",
-  "title": "大阪四日",
-  "days": [{
-    "id": "d1",
-    "city": "osaka",
-    "label": "4/2（五）",
-    "title": "抵達",
-    "spots": [{
-      "name": "難波散步",
-      "badge": "輕鬆",
-      "tone": "ok",
-      "hours": "全日",
-      "address": "難波",
-      "price": "免費",
-      "html": "<p>停留約 60 分鐘。</p>"
-    }]
-  }]
-}`}</pre>
-          </details>
         </main>
       </div>
     );
@@ -546,6 +523,7 @@ function Book({
   const [searching, setSearching] = useState(false);
   const [query, setQuery] = useState("");
   const [checkTick, setCheckTick] = useState(0);
+  const [visitTick, setVisitTick] = useState(0);
   const scrollDay = useRef("");
   const pendingSpot = useRef<number | undefined>(undefined);
   const pendingTopic = useRef<number | undefined>(undefined);
@@ -646,6 +624,12 @@ function Book({
   }, []);
 
   useEffect(() => {
+    const refresh = () => setVisitTick((value) => value + 1);
+    window.addEventListener("trip-visits", refresh);
+    return () => window.removeEventListener("trip-visits", refresh);
+  }, []);
+
+  useEffect(() => {
     if (searching) searchRef.current?.focus();
   }, [searching]);
 
@@ -684,6 +668,7 @@ function Book({
   const topic = guideParsed && topicAt !== null ? guideParsed.slices[topicAt] : undefined;
   const topicHtml = useMemo(() => (topic ? presentSlice(topic.html) : ""), [topic]);
   const progress = useMemo(() => bookingProgress(trip), [trip, checkTick]);
+  const visits = useMemo(() => loadVisits(trip.id), [trip.id, visitTick]);
   const hits = useMemo(() => (searching ? searchTrip(trip, query) : []), [searching, trip, query]);
   const spot = activeDay && spotAt !== null ? activeDay.spots[spotAt] : undefined;
   const spotView = useMemo(() => (spot ? presentSpot(spot) : null), [spot]);
@@ -794,6 +779,12 @@ function Book({
                 導航
               </a>
             ) : null}
+            {activeDay && spotAt !== null ? (
+              <CheckIn
+                at={visits[visitKey(activeDay.id, spotAt)] || ""}
+                onToggle={() => toggleVisit(trip.id, visitKey(activeDay.id, spotAt), visits[visitKey(activeDay.id, spotAt)] || "")}
+              />
+            ) : null}
             {spotView && (spotView.hours || spotView.address || spotView.price) ? (
               <dl className="facts">
                 {spotView.hours ? <div><dt>時間</dt><dd>{spotView.hours}</dd></div> : null}
@@ -828,6 +819,7 @@ function Book({
               setSpotAt(index);
               window.scrollTo({ top: 0 });
             }}
+            visits={visits}
           />
         ) : null}
 
@@ -1429,11 +1421,13 @@ function GuidePane({ html }: { html: string }) {
 function DayScreen({
   trip,
   day,
+  visits,
   onDay,
   onSpot,
 }: {
   trip: TripBook;
   day: TripDay;
+  visits: Record<string, string>;
   onDay: (id: string) => void;
   onSpot: (index: number) => void;
 }) {
@@ -1484,18 +1478,36 @@ function DayScreen({
       </div>
       {day.spots.length ? (
         <>
-          <h2 className="section-label">景點</h2>
+          <h2 className="section-label">
+            景點
+            <span className="muted">已去 {day.spots.filter((_, index) => visits[visitKey(day.id, index)]).length}／{day.spots.length}</span>
+          </h2>
           <div className="sheet">
-            {day.spots.map((item, spotIndex) => (
-              <div className="navrow" key={`${item.name}-${spotIndex}`} onClick={() => onSpot(spotIndex)}>
-                <span className="navrow-num">{spotIndex + 1}</span>
-                <span className="navrow-main">
-                  <strong>{item.name}</strong>
-                  {item.badge ? <em>{item.badge}</em> : null}
-                </span>
-                <span className="navrow-go" aria-hidden="true">›</span>
-              </div>
-            ))}
+            {day.spots.map((item, spotIndex) => {
+              const at = visits[visitKey(day.id, spotIndex)] || "";
+              return (
+                <div className="navrow spotrow" key={`${item.name}-${spotIndex}`} onClick={() => onSpot(spotIndex)}>
+                  <span className="navrow-num">{spotIndex + 1}</span>
+                  <span className="navrow-main">
+                    <strong>{item.name}</strong>
+                    {item.badge ? <em>{item.badge}</em> : null}
+                    {at ? <span className="pill-hint">{visitClock(at)} 已去</span> : null}
+                  </span>
+                  <button
+                    className={at ? "stamp on" : "stamp"}
+                    type="button"
+                    aria-label={at ? "取消打卡" : "打卡"}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      toggleVisit(trip.id, visitKey(day.id, spotIndex), at);
+                    }}
+                  >
+                    {at ? "已去" : "打卡"}
+                  </button>
+                  <span className="navrow-go" aria-hidden="true">›</span>
+                </div>
+              );
+            })}
           </div>
         </>
       ) : null}
@@ -1519,6 +1531,25 @@ function DayScreen({
         </section>
       ) : null}
     </section>
+  );
+}
+
+function visitClock(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleTimeString("zh-HK", { hour: "2-digit", minute: "2-digit", hour12: false });
+}
+
+function toggleVisit(tripId: string, key: string, at: string) {
+  writeVisit(tripId, key, at ? "" : new Date().toISOString());
+  window.dispatchEvent(new Event("trip-visits"));
+}
+
+function CheckIn({ at, onToggle }: { at: string; onToggle: () => void }) {
+  return (
+    <button className={at ? "btn stamp-lg on" : "btn stamp-lg"} type="button" onClick={onToggle}>
+      {at ? `已打卡 ${visitClock(at)}` : "打卡"}
+    </button>
   );
 }
 

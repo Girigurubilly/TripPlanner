@@ -508,9 +508,50 @@ export function loadTrips(): TripBook[] {
   }
 }
 
-const CHECKS_KEY = "tripchecks.v1";
+const VISITS_KEY = "tripvisits.v1";
+
+export type VisitMap = Record<string, Record<string, string>>;
+
+export function visitKey(dayId: string, index: number): string {
+  return `${dayId}:${index}`;
+}
+
+function readVisitMap(): VisitMap {
+  try {
+    const raw = localStorage.getItem(VISITS_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as VisitMap;
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+export function loadVisits(tripId: string): Record<string, string> {
+  return readVisitMap()[tripId] || {};
+}
+
+export function writeVisit(tripId: string, key: string, at: string): void {
+  const all = readVisitMap();
+  const current = { ...(all[tripId] || {}) };
+  if (at) current[key] = at;
+  else delete current[key];
+  all[tripId] = current;
+  localStorage.setItem(VISITS_KEY, JSON.stringify(all));
+  touchLocalEdit();
+}
+
+export function exportVisits(): VisitMap {
+  return readVisitMap();
+}
+
+export function replaceVisits(visits: VisitMap): void {
+  localStorage.setItem(VISITS_KEY, JSON.stringify(visits));
+}
 
 export type CheckMap = Record<string, Record<string, boolean>>;
+
+const CHECKS_KEY = "tripchecks.v1";
 
 function readCheckMap(): CheckMap {
   try {
@@ -601,6 +642,11 @@ export function deleteTrip(current: TripBook[], id: string): TripBook[] {
     delete checks[id];
     localStorage.setItem(CHECKS_KEY, JSON.stringify(checks));
   }
+  const visits = readVisitMap();
+  if (visits[id]) {
+    delete visits[id];
+    localStorage.setItem(VISITS_KEY, JSON.stringify(visits));
+  }
   return trips;
 }
 
@@ -619,10 +665,17 @@ export function exportNotes(): NoteMap {
   return loadAllNotes();
 }
 
-export function replaceLibrary(trips: TripBook[], notes: NoteMap, editedAt: string, checks?: CheckMap): void {
+export function replaceLibrary(
+  trips: TripBook[],
+  notes: NoteMap,
+  editedAt: string,
+  checks?: CheckMap,
+  visits?: VisitMap,
+): void {
   saveTrips(trips, { silent: true });
   localStorage.setItem(NOTES_KEY, JSON.stringify(notes));
   if (checks) replaceChecks(checks);
+  if (visits) replaceVisits(visits);
   touchLocalEdit(editedAt);
 }
 
