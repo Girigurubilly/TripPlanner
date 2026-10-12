@@ -285,6 +285,43 @@ export function loadTrips(): TripBook[] {
   }
 }
 
+const CHECKS_KEY = "tripchecks.v1";
+
+export type CheckMap = Record<string, Record<string, boolean>>;
+
+function readCheckMap(): CheckMap {
+  try {
+    const raw = localStorage.getItem(CHECKS_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as CheckMap;
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+export function loadChecks(tripId: string): Record<string, boolean> {
+  return readCheckMap()[tripId] || {};
+}
+
+export function writeCheck(tripId: string, key: string, on: boolean): void {
+  const all = readCheckMap();
+  const current = { ...(all[tripId] || {}) };
+  if (on) current[key] = true;
+  else delete current[key];
+  all[tripId] = current;
+  localStorage.setItem(CHECKS_KEY, JSON.stringify(all));
+  touchLocalEdit();
+}
+
+export function exportChecks(): CheckMap {
+  return readCheckMap();
+}
+
+export function replaceChecks(checks: CheckMap): void {
+  localStorage.setItem(CHECKS_KEY, JSON.stringify(checks));
+}
+
 export function touchLocalEdit(iso = new Date().toISOString()): void {
   try {
     localStorage.setItem(EDIT_KEY, iso);
@@ -336,6 +373,11 @@ export function deleteTrip(current: TripBook[], id: string): TripBook[] {
     delete notes[id];
     localStorage.setItem(NOTES_KEY, JSON.stringify(notes));
   }
+  const checks = readCheckMap();
+  if (checks[id]) {
+    delete checks[id];
+    localStorage.setItem(CHECKS_KEY, JSON.stringify(checks));
+  }
   return trips;
 }
 
@@ -354,9 +396,10 @@ export function exportNotes(): NoteMap {
   return loadAllNotes();
 }
 
-export function replaceLibrary(trips: TripBook[], notes: NoteMap, editedAt: string): void {
+export function replaceLibrary(trips: TripBook[], notes: NoteMap, editedAt: string, checks?: CheckMap): void {
   saveTrips(trips, { silent: true });
   localStorage.setItem(NOTES_KEY, JSON.stringify(notes));
+  if (checks) replaceChecks(checks);
   touchLocalEdit(editedAt);
 }
 

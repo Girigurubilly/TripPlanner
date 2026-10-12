@@ -7,10 +7,12 @@ import {
   uploadTripFile,
 } from "@/lib/google-drive";
 import {
+  exportChecks,
   exportNotes,
   loadTrips,
   localEditedAt,
   replaceLibrary,
+  type CheckMap,
   type NoteMap,
   type TripBook,
 } from "@/lib/trip";
@@ -23,6 +25,7 @@ export type TripSnapshot = {
   exportedAt: string;
   trips: TripBook[];
   notes: NoteMap;
+  checks?: CheckMap;
 };
 
 export type SyncResult = "pulled" | "pushed" | "ok" | "offline" | "need-auth" | "need-pass" | "missing" | "fail";
@@ -51,6 +54,7 @@ export function exportSnapshot(): TripSnapshot {
     exportedAt: new Date().toISOString(),
     trips: loadTrips(),
     notes: exportNotes(),
+    checks: exportChecks(),
   };
 }
 
@@ -168,7 +172,7 @@ export async function syncTripDrive(): Promise<SyncResult> {
     return "pushed";
   }
   if (!localAt || (remoteAt && remoteAt > localAt)) {
-    replaceLibrary(decoded.trips, decoded.notes || {}, remoteAt || new Date().toISOString());
+    replaceLibrary(decoded.trips, decoded.notes || {}, remoteAt || new Date().toISOString(), decoded.checks);
     return "pulled";
   }
   return "ok";

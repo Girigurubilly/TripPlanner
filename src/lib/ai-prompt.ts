@@ -34,7 +34,7 @@ export const AI_TRIP_PROMPT = [
   "- title, subtitle, tagline: 繁體中文",
   "- footer: 一行提醒，寫營業時間與票價出發前要再核對",
   "- nav 只係舊檔相容。畫面底部固定係：總覽、每日、交通、美食、指南。guides 的 label 用短名：攝影、美食、手信、須知。",
-  "- overviewHtml: 用 <p> 寫日期、住宿、已訂機票同門票、呢趟點玩。第一個 <h2> 會直接顯示，之後每個 <h2> 預設收起。",
+  "- overviewHtml: 用 <p> 寫日期、住宿、已訂機票同門票、呢趟點玩。第一個 <h2> 會直接顯示，之後每個 <h2> 預設收起。需要提前預訂的項目，放在標題含「預訂」的 <h2> 下面，用表格每列一項，應用程式會在每列旁邊加已訂勾選。",
   "- rationales: 每個城市一筆。city 必須與 days[].city 完全相同。html 用 <p> 解釋點解咁排，放喺當日最底。",
   "- days: 每一日一筆，依出發順序。",
   "- transport.introHtml: 一句交通原則。transport.blocks: 每日一筆，heading 必須以該日 label 開頭（例如「4/2（五）」），html 用 <ol> 列出每段點去、幾耐、幾多錢。",

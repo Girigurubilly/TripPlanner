@@ -1019,8 +1019,48 @@ details.spot,
   font-weight: 650;
   vertical-align: middle;
 }
-.facts {
-  margin: 0 0 14px;
+.book-check {
+  width: 22px;
+  height: 22px;
+  margin: 0;
+  accent-color: var(--teal);
+}
+.book-inline,
+.book-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 8px 0 0;
+  font-weight: 700;
+  color: var(--teal);
+}
+td.book-cell,
+th.book-cell {
+  width: 52px;
+  text-align: center;
+  vertical-align: middle;
+}
+tr.is-booked > td:not(.book-cell),
+p.is-booked,
+li.is-booked {
+  background: #e7f3ef;
+}
+@media (max-width: 720px) {
+  .book table.stackable tr:has(.book-cell) {
+    position: relative;
+    padding-right: 48px;
+  }
+  .book table.stackable td.book-cell {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    width: auto;
+    padding: 0;
+    border: 0;
+  }
+  .book table.stackable td.book-cell::before {
+    content: none;
+  }
 }
 .facts div {
   display: grid;

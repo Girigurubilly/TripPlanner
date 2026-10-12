@@ -20,6 +20,7 @@ import {
   deleteTrip,
   downloadTrip,
   loadNote,
+  loadChecks,
   loadTrips,
   loadUi,
   parseTripFile,
@@ -27,6 +28,7 @@ import {
   saveUi,
   tripStats,
   upsertTrips,
+  writeCheck,
   type TripBook,
   type TripDay,
 } from "@/lib/trip";
@@ -71,6 +73,68 @@ function labelTables(root: ParentNode) {
       });
     });
   });
+}
+
+function isBookingRow(text: string): boolean {
+  return /預約|已訂|已book|航班|住宿|酒店|起飛/i.test(text) || /→|->/.test(text);
+}
+
+function isBookingLine(text: string): boolean {
+  return /已book|已預約|要預約|建議預約|必預約|強制.{0,8}預約/.test(text) || /^(航班|酒店|住宿)/.test(text);
+}
+
+function bookingBox(tripId: string, key: string, on: boolean, mark: Element): HTMLInputElement {
+  const input = document.createElement("input");
+  input.type = "checkbox";
+  input.className = "book-check";
+  input.checked = on;
+  input.setAttribute("aria-label", "已預訂");
+  mark.classList.toggle("is-booked", on);
+  input.addEventListener("click", (event) => event.stopPropagation());
+  input.addEventListener("change", () => {
+    writeCheck(tripId, key, input.checked);
+    mark.classList.toggle("is-booked", input.checked);
+  });
+  return input;
+}
+
+function mountBookingChecks(root: HTMLElement, tripId: string, allRows: boolean) {
+  const checks = loadChecks(tripId);
+  root.querySelectorAll("table").forEach((table) => {
+    let any = false;
+    table.querySelectorAll("tbody tr").forEach((row) => {
+      if (row.querySelector(".book-check")) return;
+      const name = (row.querySelector("td")?.textContent || "").replace(/\s+/g, " ").trim();
+      const blob = (row.textContent || "").replace(/\s+/g, " ").trim();
+      if (!name) return;
+      if (!allRows && !isBookingRow(blob)) return;
+      any = true;
+      const cell = document.createElement("td");
+      cell.className = "book-cell";
+      cell.append(bookingBox(tripId, name.slice(0, 96), Boolean(checks[name.slice(0, 96)]), row));
+      row.prepend(cell);
+    });
+    if (!any) return;
+    const head = table.querySelector("thead tr");
+    if (head && !head.querySelector(".book-cell")) {
+      const th = document.createElement("th");
+      th.className = "book-cell";
+      th.textContent = "已訂";
+      head.prepend(th);
+    }
+  });
+  root.querySelectorAll("p, li").forEach((el) => {
+    if (!(el instanceof HTMLElement)) return;
+    if (el.closest("table") || el.querySelector(".book-check") || el.querySelector("p, li, table")) return;
+    const text = (el.textContent || "").replace(/\s+/g, " ").trim();
+    if (text.length < 4 || text.length > 280 || !isBookingLine(text)) return;
+    const key = text.slice(0, 96);
+    const label = document.createElement("label");
+    label.className = "book-inline";
+    label.append(bookingBox(tripId, key, Boolean(checks[key]), el));
+    el.prepend(label);
+  });
+  labelTables(root);
 }
 
 export function TripApp() {
@@ -521,7 +585,7 @@ function Book({
             <h1 className="screen-title">{trip.title}</h1>
             {trip.subtitle ? <p className="lede">{trip.subtitle}</p> : null}
             {trip.tagline ? <p className="lede">{trip.tagline}</p> : null}
-            <Overview html={trip.overviewHtml} />
+            <Overview html={trip.overviewHtml} tripId={trip.id} />
           </article>
         ) : null}
 
@@ -714,12 +778,12 @@ function splitOverview(html: string): { lead: string; first: string; rest: { tit
   }) };
 }
 
-function FoldSection({ title, html }: { title: string; html: string }) {
-  const [open, setOpen] = useState(false);
+function FoldSection({ title, html, tripId, startOpen }: { title: string; html: string; tripId: string; startOpen?: boolean }) {
+  const [open, setOpen] = useState(Boolean(startOpen));
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    if (open && ref.current) labelTables(ref.current);
-  }, [open]);
+    if (open && ref.current) mountBookingChecks(ref.current, tripId, /預訂|預約/.test(title));
+  }, [open, html, tripId, title]);
   return (
     <section className="fold">
       <div className="fold-bar" onClick={() => setOpen((value) => !value)}>
@@ -731,18 +795,46 @@ function FoldSection({ title, html }: { title: string; html: string }) {
   );
 }
 
-function Overview({ html }: { html: string }) {
+function Overview({ html, tripId }: { html: string; tripId: string }) {
   const parts = useMemo(() => splitOverview(shownHtml(html)), [html]);
-  if (!parts.rest.length) return <Html html={html} />;
+  const leadRef = useRef<HTMLDivElement>(null);
+  const firstRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (leadRef.current) mountBookingChecks(leadRef.current, tripId, false);
+    if (firstRef.current) mountBookingChecks(firstRef.current, tripId, sectionIsBooking(parts.first));
+  }, [parts.lead, parts.first, tripId]);
+  if (!parts.rest.length) {
+    return <CheckedHtml html={shownHtml(html)} tripId={tripId} allRows={sectionIsBooking(shownHtml(html))} />;
+  }
   return (
     <>
-      {parts.lead ? <div className="reading" dangerouslySetInnerHTML={{ __html: parts.lead }} /> : null}
-      <div className="reading" dangerouslySetInnerHTML={{ __html: parts.first }} />
+      {parts.lead ? <div className="reading" ref={leadRef} dangerouslySetInnerHTML={{ __html: parts.lead }} /> : null}
+      <div className="reading" ref={firstRef} dangerouslySetInnerHTML={{ __html: parts.first }} />
       {parts.rest.map((section) => (
-        <FoldSection key={section.title} title={section.title} html={section.html} />
+        <FoldSection
+          key={section.title}
+          title={section.title}
+          html={section.html}
+          tripId={tripId}
+          startOpen={/預訂|預約/.test(section.title)}
+        />
       ))}
     </>
   );
+}
+
+function CheckedHtml({ html, tripId, allRows }: { html: string; tripId: string; allRows: boolean }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (ref.current) mountBookingChecks(ref.current, tripId, allRows);
+  }, [html, tripId, allRows]);
+  return <div className="reading" ref={ref} dangerouslySetInnerHTML={{ __html: html }} />;
+}
+
+function sectionIsBooking(html: string): boolean {
+  if (typeof DOMParser === "undefined") return /<h2>[^<]*(預訂|預約)/.test(html);
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  return [...doc.querySelectorAll("h2")].some((head) => /預訂|預約/.test(head.textContent || ""));
 }
 
 function shownHtml(html: string): string {
@@ -1032,6 +1124,10 @@ function DayScreen({
 }) {
   const index = trip.days.findIndex((item) => item.id === day.id);
   const rationale = trip.rationales.find((item) => item.city && item.city === day.city);
+  const readRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (readRef.current) mountBookingChecks(readRef.current, trip.id, false);
+  }, [day, trip.id]);
   return (
     <section className="screen">
       <div className="daystrip" aria-label="日期">
@@ -1065,7 +1161,7 @@ function DayScreen({
           ))}
         </div>
       ) : null}
-      <div className="reading">
+      <div className="reading" ref={readRef}>
         {day.leadHtml ? <Html html={day.leadHtml} /> : null}
         {day.walkHtml ? <Html html={day.walkHtml} /> : null}
         {day.foodHtml ? <Html html={day.foodHtml} /> : null}
