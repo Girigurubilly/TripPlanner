@@ -32,8 +32,6 @@ import {
   type TripDay,
 } from "@/lib/trip";
 
-const SAMPLE_URL = `${import.meta.env.BASE_URL}samples/euro-trip-2026-12.json`;
-
 const TAB_ICON: Record<string, LucideIcon> = {
   overview: BookOpen,
   days: CalendarDays,
@@ -131,17 +129,6 @@ export function TripApp() {
     }
   }
 
-  async function loadSample() {
-    try {
-      const response = await fetch(SAMPLE_URL);
-      if (!response.ok) throw new Error("找不到範例檔");
-      importBooks(parseTripFile(await response.text()), "歐洲聖誕範例");
-    } catch (err) {
-      setStatus("");
-      setError(err instanceof Error ? err.message : "無法載入範例");
-    }
-  }
-
   function onDrop(event: DragEvent) {
     event.preventDefault();
     setDragOver(false);
@@ -199,9 +186,6 @@ export function TripApp() {
                 <strong>上傳行程 JSON</strong>
                 <span>內容同筆記只留喺呢部機，唔會上載</span>
               </button>
-              <button className="btn" type="button" onClick={() => void loadSample()}>
-                載入歐洲聖誕範例
-              </button>
             </section>
           ) : (
             <section>
@@ -228,9 +212,6 @@ export function TripApp() {
                   />
                 ))}
               </div>
-              <button className="btn sample-link" type="button" onClick={() => void loadSample()}>
-                載入歐洲聖誕範例
-              </button>
             </section>
           )}
           {status ? <p className="status">{status}</p> : null}
@@ -242,7 +223,7 @@ export function TripApp() {
             </p>
             <pre>{`{
   "schemaVersion": 1,
-  "id": "euro-2026-12",
+  "id": "my-trip",
   "title": "旅行計畫",
   "days": [{ "id": "d1", "label": "Day 1", "title": "到達", "spots": [] }],
   "guides": [{ "id": "food", "label": "美食", "html": "" }]

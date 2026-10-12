@@ -347,8 +347,7 @@ summary:focus-visible {
   gap: 12px;
   padding: 8px 0 8px;
 }
-.empty h1,
-.sample-link {
+.empty h1 {
   align-self: center;
 }
 .confirm-row,
