@@ -736,12 +736,64 @@ export function tabsFor(trip: TripBook): { id: string; label: string }[] {
   return tabs;
 }
 
-export function downloadTrip(trip: TripBook): void {
-  const blob = new Blob([JSON.stringify(trip, null, 2)], { type: "application/json" });
+export function absorbSaved(text: string): void {
+  let data: unknown;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    return;
+  }
+  const list = Array.isArray(data) ? data : [data];
+  const notes = loadAllNotes();
+  const checks = readCheckMap();
+  const visits = readVisitMap();
+  let changed = false;
+  for (const item of list) {
+    if (!item || typeof item !== "object") continue;
+    const raw = item as Record<string, unknown>;
+    const id = asString(raw.id).trim();
+    const saved = raw.saved;
+    if (!id || !saved || typeof saved !== "object") continue;
+    const bag = saved as Record<string, unknown>;
+    if (bag.notes && typeof bag.notes === "object") {
+      notes[id] = bag.notes as Record<string, string>;
+      changed = true;
+    }
+    if (bag.checks && typeof bag.checks === "object") {
+      checks[id] = bag.checks as Record<string, boolean>;
+      changed = true;
+    }
+    if (bag.visits && typeof bag.visits === "object") {
+      visits[id] = bag.visits as Record<string, string>;
+      changed = true;
+    }
+  }
+  if (!changed) return;
+  localStorage.setItem(NOTES_KEY, JSON.stringify(notes));
+  localStorage.setItem(CHECKS_KEY, JSON.stringify(checks));
+  localStorage.setItem(VISITS_KEY, JSON.stringify(visits));
+  touchLocalEdit();
+}
+
+export async function downloadTrip(trip: TripBook): Promise<void> {
+  const file = {
+    ...trip,
+    saved: {
+      notes: loadAllNotes()[trip.id] || {},
+      checks: readCheckMap()[trip.id] || {},
+      visits: readVisitMap()[trip.id] || {},
+    },
+  };
+  const blob = new Blob([JSON.stringify(file, null, 2)], { type: "application/json" });
+  const named = new File([blob], `${trip.id}.json`, { type: "application/json" });
+  if (typeof navigator !== "undefined" && navigator.canShare?.({ files: [named] })) {
+    await navigator.share({ files: [named], title: trip.title });
+    return;
+  }
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = `${trip.id}.json`;
+  link.download = named.name;
   link.click();
   URL.revokeObjectURL(url);
 }

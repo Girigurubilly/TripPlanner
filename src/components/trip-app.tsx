@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import {
   cityLabel,
+  absorbSaved,
   deleteTrip,
   downloadTrip,
   loadNote,
@@ -308,6 +309,7 @@ export function TripApp() {
   async function onFile(file: File) {
     try {
       const text = await file.text();
+      absorbSaved(text);
       importBooks(parseTripFile(text), file.name);
     } catch (err) {
       setStatus("");
@@ -478,7 +480,7 @@ function TripCard({
         </span>
       </div>
       <div className="tile-actions">
-        <button className="icon-btn" type="button" aria-label="匯出 JSON" onClick={() => downloadTrip(trip)}>
+        <button className="icon-btn" type="button" aria-label="儲存行程" onClick={() => void downloadTrip(trip)}>
           <Download size={18} aria-hidden="true" />
         </button>
         <button className="icon-btn" type="button" aria-label="刪除行程" onClick={() => setConfirm(true)}>
@@ -917,6 +919,12 @@ function Book({
         ) : null}
 
         {trip.footer && !searching && !spot && topicAt === null ? <p className="foot">{trip.footer}</p> : null}
+        {!searching && !spot && topicAt === null ? (
+          <button className="btn save-trip" type="button" onClick={() => void downloadTrip(trip)}>
+            <Download size={18} aria-hidden="true" />
+            儲存行程
+          </button>
+        ) : null}
       </main>
       <nav className="dock" aria-label="主要畫面">
         {[

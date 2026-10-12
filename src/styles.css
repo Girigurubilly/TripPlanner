@@ -1217,7 +1217,12 @@ a[data-goto] {
   text-align: center;
   color: var(--muted);
   font-size: 0.85rem;
-  padding: 10px 16px 28px;
+  padding: 10px 16px 8px;
+}
+.save-trip {
+  display: flex;
+  width: calc(100% - 32px);
+  margin: 8px 16px 20px;
 }
 
 .lightbox {
