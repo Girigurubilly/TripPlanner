@@ -32,7 +32,7 @@ import {
   type TripDay,
 } from "@/lib/trip";
 
-const SAMPLE_URL = "/samples/euro-trip-2026-12.json";
+const SAMPLE_URL = `${import.meta.env.BASE_URL}samples/euro-trip-2026-12.json`;
 
 const TAB_ICON: Record<string, LucideIcon> = {
   overview: BookOpen,
