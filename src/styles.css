@@ -426,16 +426,6 @@ summary:focus-visible {
   font-size: 0.78rem;
   word-break: break-all;
 }
-  width: 100%;
-  min-height: 180px;
-  margin-top: 8px;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  padding: 10px;
-  font: inherit;
-  font-size: 0.82rem;
-  line-height: 1.45;
-}
 .confirm-row,
 .confirmbar {
   display: flex;
