@@ -491,6 +491,19 @@ details.spot > summary {
 details.spot > summary::-webkit-details-marker {
   display: none;
 }
+button.spot-toggle {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  appearance: none;
+  cursor: pointer;
+}
 .spot-row {
   display: flex;
   align-items: center;
@@ -498,13 +511,8 @@ details.spot > summary::-webkit-details-marker {
   width: 100%;
   min-height: 44px;
   padding: 14px 16px;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  font: inherit;
+  box-sizing: border-box;
   font-weight: 700;
-  text-align: left;
-  cursor: pointer;
 }
 details.spot > summary:hover .spot-row,
 .spot-row:hover {
@@ -593,6 +601,76 @@ details.spot[open] > summary .spot-row::after {
 }
 #guide-body {
   scroll-margin-top: 168px;
+}
+.guide-read {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 14px 14px 4px;
+}
+.guide-read .kicker {
+  margin: 16px 0 8px;
+  font-size: 1rem;
+  font-weight: 700;
+  line-height: 1.4;
+  color: var(--navy);
+}
+.guide-read .kicker:first-child {
+  margin-top: 0;
+}
+.guide-read p,
+.guide-read li {
+  font-size: 0.98rem;
+  line-height: 1.7;
+}
+.guide-read p {
+  margin: 0 0 12px;
+}
+.guide-read ul,
+.guide-read ol {
+  margin: 0 0 12px;
+  padding: 0;
+  list-style: none;
+}
+.guide-read ol {
+  counter-reset: guide-item;
+}
+.guide-read ol > li::before {
+  content: counter(guide-item);
+  position: absolute;
+  left: 12px;
+  font-weight: 700;
+  color: var(--teal);
+}
+.guide-read li {
+  position: relative;
+  margin: 0 0 8px;
+  padding: 10px 12px;
+  background: #faf7f0;
+  border-radius: 10px;
+}
+.guide-read ol > li {
+  counter-increment: guide-item;
+  padding-left: 36px;
+}
+.guide-read li.hours {
+  background: #fff8e6;
+}
+.guide-read .deep {
+  margin: 4px 0 12px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+.guide-read figure,
+.guide-read .refimg {
+  margin: 0 0 12px;
+}
+.guide-read img {
+  width: 100%;
+  max-height: 220px;
+  object-fit: cover;
+  border-radius: 10px;
 }
 .guidenav {
   position: fixed;
@@ -898,7 +976,6 @@ details.spot > summary {
 }
 .spotbody {
   padding: 0 16px 16px;
-  border-top: 1px dashed var(--line);
 }
 .badge {
   font-size: 0.78rem;
@@ -930,10 +1007,11 @@ details.spot > summary {
   padding: 4px 12px;
 }
 .deep {
-  background: #fbf8f1;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  padding: 12px 16px;
+  background: transparent;
+  border: 0;
+  border-top: 1px dashed var(--line);
+  border-radius: 0;
+  padding: 12px 0 0;
   margin: 12px 0;
 }
 .deep h4 {

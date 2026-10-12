@@ -634,14 +634,25 @@ function foldPlaces(root: HTMLElement) {
   }
 }
 
-function foldSlice(html: string, foldH3: boolean): string {
+function presentSlice(html: string): string {
   if (typeof DOMParser === "undefined") return html;
   const doc = new DOMParser().parseFromString(`<div id="slice">${html}</div>`, "text/html");
   const root = doc.getElementById("slice");
   if (!root) return html;
-  foldPlaces(root);
-  if (foldH3) foldByHeading(root, "H3");
-  foldByHeading(root, "H4");
+  while (root.children.length === 1 && root.firstElementChild?.classList.contains("card")) {
+    const card = root.firstElementChild;
+    while (card.firstChild) root.insertBefore(card.firstChild, card);
+    card.remove();
+  }
+  const first = root.firstElementChild;
+  if (first && (first.tagName === "H2" || first.tagName === "H3" || first.tagName === "H4")) first.remove();
+  for (const head of [...root.querySelectorAll("h2, h3, h4")]) {
+    if (!(head instanceof HTMLElement)) continue;
+    const kicker = doc.createElement("p");
+    kicker.className = "kicker";
+    kicker.textContent = chipTitle(headingLabel(head));
+    head.replaceWith(kicker);
+  }
   return root.innerHTML;
 }
 
@@ -653,10 +664,7 @@ function GuidePane({ html }: { html: string }) {
   const many = parsed.slices.length > 1;
   const safeIndex = Math.min(index, parsed.slices.length - 1);
   const slice = parsed.slices[safeIndex];
-  const folded = useMemo(
-    () => (slice ? foldSlice(slice.html, parsed.slices.length > 1 && slice.html.includes("<h2")) : ""),
-    [slice],
-  );
+  const body = useMemo(() => (slice ? presentSlice(slice.html) : ""), [slice]);
 
   useEffect(() => {
     setIndex(0);
@@ -666,7 +674,7 @@ function GuidePane({ html }: { html: string }) {
     const current = stripRef.current?.querySelector('[aria-pressed="true"]');
     current?.scrollIntoView({ inline: "center", block: "nearest" });
     if (bodyRef.current) labelTables(bodyRef.current);
-  }, [safeIndex, folded]);
+  }, [safeIndex, body]);
 
   if (!slice) return <Html html={html} />;
 
@@ -691,7 +699,7 @@ function GuidePane({ html }: { html: string }) {
           ))}
         </div>
       ) : null}
-      <div id="guide-body" ref={bodyRef} dangerouslySetInnerHTML={{ __html: folded || slice.html }} />
+      <div id="guide-body" className="guide-read" ref={bodyRef} dangerouslySetInnerHTML={{ __html: body || slice.html }} />
       {many ? (
         <nav className="guidenav" aria-label="前後段">
           <button className="btn" type="button" disabled={safeIndex === 0} onClick={() => setIndex(safeIndex - 1)}>
@@ -819,7 +827,7 @@ function DayPane({
           return (
             <div className="spot" key={key}>
               <button
-                className="spot-row"
+                className="spot-toggle"
                 type="button"
                 aria-expanded={shown}
                 onClick={() => {
@@ -836,9 +844,11 @@ function DayPane({
                   setOpenSpots((current) => ({ ...current, [key]: !current[key] }));
                 }}
               >
-                <span className="spot-index">{spotIndex + 1}</span>
-                <span className="spotname">{spot.name}</span>
-                {spot.badge ? <span className={`badge ${spot.tone}`}>{spot.badge}</span> : null}
+                <span className="spot-row">
+                  <span className="spot-index">{spotIndex + 1}</span>
+                  <span className="spotname">{spot.name}</span>
+                  {spot.badge ? <span className={`badge ${spot.tone}`}>{spot.badge}</span> : null}
+                </span>
               </button>
               {shown ? <div className="spotbody" dangerouslySetInnerHTML={{ __html: spot.html }} /> : null}
             </div>
