@@ -6,6 +6,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Coffee,
+  Copy,
   Download,
   Gift,
   Info,
@@ -31,6 +32,7 @@ import {
   type TripBook,
   type TripDay,
 } from "@/lib/trip";
+import { AI_TRIP_PROMPT } from "@/lib/ai-prompt";
 
 const TAB_ICON: Record<string, LucideIcon> = {
   overview: BookOpen,
@@ -81,6 +83,7 @@ export function TripApp() {
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
   const [dragOver, setDragOver] = useState(false);
+  const [promptFallback, setPromptFallback] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -126,6 +129,18 @@ export function TripApp() {
     } catch (err) {
       setStatus("");
       setError(err instanceof Error ? err.message : "無法讀取行程檔");
+    }
+  }
+
+  async function copyPrompt() {
+    try {
+      await navigator.clipboard.writeText(AI_TRIP_PROMPT);
+      setError("");
+      setStatus("已複製提示詞。貼去 AI 後，佢會先問你，再用繁體中文出 JSON。");
+    } catch {
+      setStatus("");
+      setError("複製失敗，請長按下面文字再複製。");
+      setPromptFallback(true);
     }
   }
 
@@ -216,6 +231,15 @@ export function TripApp() {
           )}
           {status ? <p className="status">{status}</p> : null}
           {error ? <p className="status error">{error}</p> : null}
+          <p className="prompt-row">
+            <button className="prompt-link" type="button" onClick={() => void copyPrompt()}>
+              <Copy size={16} aria-hidden="true" />
+              複製 AI 行程提示詞
+            </button>
+          </p>
+          {promptFallback ? (
+            <textarea className="prompt-box" readOnly value={AI_TRIP_PROMPT} />
+          ) : null}
           <details className="format">
             <summary>行程檔格式</summary>
             <p className="tiny">

@@ -350,6 +350,33 @@ summary:focus-visible {
 .empty h1 {
   align-self: center;
 }
+.prompt-row {
+  margin: 14px 0 0;
+}
+.prompt-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.prompt-box {
+  width: 100%;
+  min-height: 180px;
+  margin-top: 8px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 10px;
+  font: inherit;
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
 .confirm-row,
 .confirmbar {
   display: flex;
