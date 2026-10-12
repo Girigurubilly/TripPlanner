@@ -825,35 +825,33 @@ function DayPane({
           const key = `${spotIndex}-${spot.name}`;
           const shown = openAll || Boolean(openSpots[key]);
           return (
-            <div className={`spot${shown ? " open" : ""}`} key={key}>
-              <div className="spot-face">
+            <div className="spot" key={key}>
+              <h3
+                className="spot-title"
+                onClick={() => {
+                  if (openAll) {
+                    const next: Record<string, boolean> = {};
+                    day.spots.forEach((item, itemIndex) => {
+                      next[`${itemIndex}-${item.name}`] = true;
+                    });
+                    next[key] = false;
+                    setOpenAll(false);
+                    setOpenSpots(next);
+                    return;
+                  }
+                  setOpenSpots((current) => ({ ...current, [key]: !current[key] }));
+                }}
+              >
                 <span className="spot-index">{spotIndex + 1}</span>
-                <span className="spotname" id={`spot-label-${day.id}-${spotIndex}`}>
-                  {spot.name}
-                </span>
-                {spot.badge ? <span className={`badge ${spot.tone}`}>{spot.badge}</span> : null}
-                <span className="spot-chev" aria-hidden="true" />
-                <button
-                  className="spot-cover"
-                  type="button"
-                  aria-expanded={shown}
-                  aria-labelledby={`spot-label-${day.id}-${spotIndex}`}
-                  onClick={() => {
-                    if (openAll) {
-                      const next: Record<string, boolean> = {};
-                      day.spots.forEach((item, itemIndex) => {
-                        next[`${itemIndex}-${item.name}`] = true;
-                      });
-                      next[key] = false;
-                      setOpenAll(false);
-                      setOpenSpots(next);
-                      return;
-                    }
-                    setOpenSpots((current) => ({ ...current, [key]: !current[key] }));
-                  }}
-                />
-              </div>
-              {shown ? <div className="spotbody" dangerouslySetInnerHTML={{ __html: spot.html }} /> : null}
+                {spot.name}
+                <span className="spot-state">{shown ? "收起" : "展開"}</span>
+              </h3>
+              {shown ? (
+                <div className="spotbody">
+                  {spot.badge ? <p className="spot-badge-row"><span className={`badge ${spot.tone}`}>{spot.badge}</span></p> : null}
+                  <div dangerouslySetInnerHTML={{ __html: spot.html }} />
+                </div>
+              ) : null}
             </div>
           );
         })}
