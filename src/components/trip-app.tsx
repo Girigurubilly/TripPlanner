@@ -36,6 +36,7 @@ import {
   upsertTrips,
   writeCheck,
   type TripBook,
+  type TripSpot,
   type TripDay,
 } from "@/lib/trip";
 import { DrivePanel } from "@/components/drive-panel";
@@ -461,11 +462,6 @@ export function TripApp() {
       onTab={setTab}
       onDay={setDayId}
       onBack={() => setOpenId("")}
-      onDelete={() => {
-        setTrips(deleteTrip(trips, openTrip.id));
-        setOpenId("");
-        setStatus(`已刪除「${openTrip.title}」`);
-      }}
     />
   );
 }
@@ -504,6 +500,14 @@ function TripCard({
           {progress.total ? <span className="muted">已訂 {progress.done}／{progress.total}</span> : null}
         </span>
       </div>
+      <div className="tile-actions">
+        <button className="icon-btn" type="button" aria-label="匯出 JSON" onClick={() => downloadTrip(trip)}>
+          <Download size={18} aria-hidden="true" />
+        </button>
+        <button className="icon-btn" type="button" aria-label="刪除行程" onClick={() => setConfirm(true)}>
+          <Trash2 size={18} aria-hidden="true" />
+        </button>
+      </div>
       {confirm ? (
         <div className="confirm-row">
           <span>刪除呢個行程？</span>
@@ -514,11 +518,7 @@ function TripCard({
             取消
           </button>
         </div>
-      ) : (
-        <button className="icon-btn" type="button" aria-label="刪除行程" onClick={() => setConfirm(true)}>
-          <Trash2 size={18} aria-hidden="true" />
-        </button>
-      )}
+      ) : null}
     </article>
   );
 }
@@ -530,7 +530,6 @@ function Book({
   onTab,
   onDay,
   onBack,
-  onDelete,
 }: {
   trip: TripBook;
   tab: string;
@@ -538,12 +537,10 @@ function Book({
   onTab: (id: string) => void;
   onDay: (id: string) => void;
   onBack: () => void;
-  onDelete: () => void;
 }) {
   const activeTab = tab || (trip.days.length ? "days" : "overview");
   const activeDay = trip.days.find((day) => day.id === dayId) || trip.days[0];
   const [lightbox, setLightbox] = useState("");
-  const [confirmDelete, setConfirmDelete] = useState(false);
   const [spotAt, setSpotAt] = useState<number | null>(null);
   const [topicAt, setTopicAt] = useState<number | null>(null);
   const [searching, setSearching] = useState(false);
@@ -647,7 +644,7 @@ function Book({
   const progress = useMemo(() => bookingProgress(trip), [trip, checkTick]);
   const hits = useMemo(() => (searching ? searchTrip(trip, query) : []), [searching, trip, query]);
   const spot = activeDay && spotAt !== null ? activeDay.spots[spotAt] : undefined;
-  const spotBody = useMemo(() => (spot ? spotHtml(spot.html, spot.name) : ""), [spot]);
+  const spotView = useMemo(() => (spot ? presentSpot(spot) : null), [spot]);
   let screenTitle = trip.title;
   if (spot) screenTitle = spot.name;
   else if (rootTab === "days" && activeDay) screenTitle = activeDay.label || activeDay.title;
@@ -724,24 +721,7 @@ function Book({
             <Search size={18} aria-hidden="true" />
           </button>
         )}
-        <button className="icon-btn" type="button" aria-label="匯出 JSON" onClick={() => downloadTrip(trip)}>
-          <Download size={18} aria-hidden="true" />
-        </button>
-        <button className="icon-btn" type="button" aria-label="刪除行程" onClick={() => setConfirmDelete(true)}>
-          <Trash2 size={18} aria-hidden="true" />
-        </button>
       </header>
-      {confirmDelete ? (
-        <div className="confirmbar">
-          <span>刪除呢個行程？只會清呢部機。</span>
-          <button className="btn danger" type="button" onClick={onDelete}>
-            刪除
-          </button>
-          <button className="btn ghost" type="button" onClick={() => setConfirmDelete(false)}>
-            取消
-          </button>
-        </div>
-      ) : null}
       <main ref={mainRef}>
         {searching ? (
           <section className="screen">
@@ -770,14 +750,15 @@ function Book({
                 導航
               </a>
             ) : null}
-            {spot.hours || spot.address || spot.price ? (
+            {spotView && (spotView.hours || spotView.address || spotView.price) ? (
               <dl className="facts">
-                {spot.hours ? <div><dt>時間</dt><dd>{spot.hours}</dd></div> : null}
-                {spot.address ? <div><dt>地點</dt><dd>{spot.address}</dd></div> : null}
-                {spot.price ? <div><dt>費用</dt><dd>{spot.price}</dd></div> : null}
+                {spotView.hours ? <div><dt>時間</dt><dd>{spotView.hours}</dd></div> : null}
+                {spotView.address ? <div><dt>地點</dt><dd>{spotView.address}</dd></div> : null}
+                {spotView.price ? <div><dt>費用</dt><dd>{spotView.price}</dd></div> : null}
               </dl>
             ) : null}
-            <div dangerouslySetInnerHTML={{ __html: spotBody }} />
+            <div dangerouslySetInnerHTML={{ __html: spotView?.brief || "" }} />
+            {spotView?.deep ? <SpotMore html={spotView.deep} /> : null}
           </article>
         ) : null}
 
@@ -1067,6 +1048,66 @@ function spotHtml(html: string, name: string): string {
     if (text === key || (key && text.includes(key) && text.length < key.length + 16)) el.remove();
   }
   return root.innerHTML;
+}
+
+function afterLabel(text: string, label: string): string {
+  const mark = text.indexOf(label);
+  if (mark < 0) return text;
+  return text.slice(mark + label.length).replace(/^\s*[：:]\s*/, "").trim();
+}
+
+function presentSpot(spot: TripSpot): { hours: string; address: string; price: string; brief: string; deep: string } {
+  const html = spotHtml(spot.html, spot.name);
+  if (typeof DOMParser === "undefined") {
+    return { hours: spot.hours, address: spot.address, price: spot.price, brief: html, deep: "" };
+  }
+  const doc = new DOMParser().parseFromString(`<div id="spot-view">${html}</div>`, "text/html");
+  const root = doc.getElementById("spot-view");
+  if (!root) return { hours: spot.hours, address: spot.address, price: spot.price, brief: html, deep: "" };
+  let hours = spot.hours;
+  let address = spot.address;
+  let price = spot.price;
+  for (const li of [...root.querySelectorAll("li")]) {
+    const text = (li.textContent || "").replace(/\s+/g, " ").trim();
+    if (!hours && /開放時間|營業時間/.test(text)) {
+      hours = afterLabel(text, /營業時間/.test(text) ? "營業時間" : "開放時間");
+      li.remove();
+    } else if (!address && text.includes("地址")) {
+      address = afterLabel(text, "地址");
+      li.remove();
+    } else if (!price && /門票|價錢|人均/.test(text)) {
+      const label = text.includes("門票") ? "門票" : text.includes("人均") ? "人均" : "價錢";
+      price = afterLabel(text, label);
+      li.remove();
+    }
+  }
+  root.querySelectorAll("ul, ol").forEach((list) => {
+    if (!list.children.length) list.remove();
+  });
+  root.querySelectorAll("a.maplink").forEach((link) => link.remove());
+  const deepParts: string[] = [];
+  root.querySelectorAll(".deep").forEach((block) => {
+    deepParts.push(block.innerHTML);
+    block.remove();
+  });
+  root.querySelectorAll("hr").forEach((rule) => {
+    if (!rule.nextElementSibling && !rule.previousElementSibling) rule.remove();
+  });
+  return { hours, address, price, brief: root.innerHTML, deep: deepParts.join("") };
+}
+
+function SpotMore({ html }: { html: string }) {
+  const [open, setOpen] = useState(false);
+  if (!html.trim()) return null;
+  return (
+    <section className="fold">
+      <div className="fold-bar" onClick={() => setOpen((value) => !value)}>
+        <strong>深度導覽</strong>
+        <span>{open ? "收起" : "展開"}</span>
+      </div>
+      {open ? <div className="reading" dangerouslySetInnerHTML={{ __html: html }} /> : null}
+    </section>
+  );
 }
 
 type GuideSlice = { title: string; html: string };
@@ -1476,7 +1517,7 @@ function DayNotes({ tripId, dayId }: { tripId: string; dayId: string }) {
       </div>
       <textarea
         value={value}
-        placeholder="去到先寫：實際去咗邊、使咗幾多、有咩下次唔同做法…（自動存在呢部機，唔會上傳）"
+        placeholder="去到先寫：實際去咗邊、使咗幾多、有咩下次唔同做法。會同行程一齊同步。"
         onChange={(event) => {
           setValue(event.target.value);
           saveNote(tripId, dayId, event.target.value);

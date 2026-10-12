@@ -285,16 +285,20 @@ summary:focus-visible {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  padding: 12px 52px 14px 14px;
+  padding: 12px 104px 14px 14px;
 }
 .trip-copy strong {
   font-size: 1.02rem;
   line-height: 1.35;
 }
-.trip-tile .icon-btn {
+.tile-actions {
   position: absolute;
-  right: 10px;
-  bottom: 10px;
+  right: 8px;
+  bottom: 8px;
+  display: flex;
+  gap: 4px;
+}
+.tile-actions .icon-btn {
   background: var(--card);
 }
 .chips {
