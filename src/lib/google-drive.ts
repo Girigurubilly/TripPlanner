@@ -3,6 +3,7 @@ const FOLDER_NAME = "行程書";
 const FILE_SCOPE = "https://www.googleapis.com/auth/drive.file";
 const SHARE_SCOPE = "https://www.googleapis.com/auth/drive";
 const CLIENT_KEY = "tripbook-google-client-id";
+const DEFAULT_GOOGLE_CLIENT_ID = "214174071830-9t6rvidpsa16qgeminojphr5tld9vmq2.apps.googleusercontent.com";
 const FOLDER_ID_KEY = "tripbook-drive-folder-id";
 const FILE_ID_KEY = "tripbook-drive-file-id";
 const ACTION_KEY = "tripbook-drive-action";
@@ -15,9 +16,9 @@ export type DriveAction = "sync" | "share";
 
 export function readGoogleClientId(): string {
   try {
-    return localStorage.getItem(CLIENT_KEY)?.trim() ?? "";
+    return localStorage.getItem(CLIENT_KEY)?.trim() || DEFAULT_GOOGLE_CLIENT_ID;
   } catch {
-    return "";
+    return DEFAULT_GOOGLE_CLIENT_ID;
   }
 }
 

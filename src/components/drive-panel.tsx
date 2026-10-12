@@ -12,7 +12,6 @@ import {
   takePendingDriveAction,
   takeRedirectToken,
   writeDriveFileId,
-  writeGoogleClientId,
   writeShareScope,
 } from "@/lib/google-drive";
 
@@ -21,14 +20,13 @@ const RESULT: Record<SyncResult, string> = {
   pushed: "已將呢部機嘅行程同步上 Google Drive。",
   ok: "兩邊已經一樣，冇需要更新。",
   offline: "而家冇網絡。",
-  "need-auth": "請先貼上 Google Client ID。",
+  "need-auth": "Google 登入未完成。",
   "need-pass": "請先設定密碼。兩部機要一樣。",
   missing: "Drive 未有行程檔。",
   fail: "同步失敗。請再登入一次。",
 };
 
 export function DrivePanel({ onLibraryChange }: { onLibraryChange: () => void }) {
-  const [clientId, setClientId] = useState("");
   const [password, setPassword] = useState("");
   const [email, setEmail] = useState("");
   const [fileId, setFileId] = useState("");
@@ -37,7 +35,6 @@ export function DrivePanel({ onLibraryChange }: { onLibraryChange: () => void })
   const [message, setMessage] = useState("");
 
   useEffect(() => {
-    setClientId(readGoogleClientId());
     setPassword(readDrivePass());
     setFileId(readDriveFileId());
     setShareMode(shareScopeEnabled());
@@ -57,7 +54,6 @@ export function DrivePanel({ onLibraryChange }: { onLibraryChange: () => void })
   }, []);
 
   function saveFields() {
-    writeGoogleClientId(clientId);
     writeDrivePass(password.trim());
     writeDriveFileId(fileId.trim());
   }
@@ -104,7 +100,7 @@ export function DrivePanel({ onLibraryChange }: { onLibraryChange: () => void })
           startGoogleSignIn(action);
           return;
         } catch {
-          setMessage("請檢查 Client ID。");
+          setMessage("Google 登入失敗。請核對 Google Cloud 嘅 Redirect URI。");
           return;
         }
       }
@@ -126,8 +122,8 @@ export function DrivePanel({ onLibraryChange }: { onLibraryChange: () => void })
 
   async function begin(action: "sync" | "share") {
     saveFields();
-    if (!clientId.trim()) {
-      setMessage("請貼上同 HK Life Money 一樣嘅 Google Client ID。");
+    if (!readGoogleClientId()) {
+      setMessage("未有 Google Client ID。");
       return;
     }
     if (!password.trim()) {
@@ -157,18 +153,9 @@ export function DrivePanel({ onLibraryChange }: { onLibraryChange: () => void })
       </summary>
       <div className="drive-body">
         <p className="tiny">
-          同 HK Life Money 一樣，用你自己嘅 Google Client ID。行程同筆記會加密後放到 Google Drive 一個檔案
+          Google Client ID 已內置。行程同筆記會加密後放到 Google Drive 一個檔案
           <code>行程書/trip-book.json</code>。
         </p>
-        <label className="drive-field">
-          Google Client ID
-          <input
-            value={clientId}
-            onChange={(event) => setClientId(event.target.value)}
-            autoComplete="off"
-            placeholder="xxxx.apps.googleusercontent.com"
-          />
-        </label>
         <label className="drive-field">
           加密密碼
           <input
@@ -199,7 +186,7 @@ export function DrivePanel({ onLibraryChange }: { onLibraryChange: () => void })
         </label>
         <p className="tiny">
           你同老婆唔同 Gmail 先需要開。Google 可能話呢個 app 未驗證，撳進階再繼續。兩邊都開呢個選項，用同一個
-          Client ID、密碼同檔案 ID。
+          密碼同檔案 ID。
         </p>
         <label className="drive-field">
           老婆 Gmail
