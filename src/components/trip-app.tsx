@@ -13,6 +13,7 @@ import {
   TrainFront,
   Trash2,
   Upload,
+  Navigation,
   type LucideIcon,
 } from "lucide-react";
 import {
@@ -23,10 +24,14 @@ import {
   loadChecks,
   loadTrips,
   loadUi,
+  mapLink,
   parseTripFile,
   saveNote,
   saveUi,
+  timingLabel,
+  todayDay,
   tripStats,
+  tripTiming,
   upsertTrips,
   writeCheck,
   type TripBook,
@@ -159,7 +164,12 @@ export function TripApp() {
     setTrips(stored);
     const returning =
       window.location.hash.includes("access_token") || window.location.hash.includes("error=");
-    if (!returning && ui.openId && stored.some((trip) => trip.id === ui.openId)) {
+    const live = stored.find((trip) => todayDay(trip));
+    if (!returning && live) {
+      setOpenId(live.id);
+      setTab("days");
+      setDayId(todayDay(live)?.id || "");
+    } else if (!returning && ui.openId && stored.some((trip) => trip.id === ui.openId)) {
       setOpenId(ui.openId);
       setTab(ui.tab);
       setDayId(ui.dayId);
@@ -302,9 +312,10 @@ export function TripApp() {
                     key={trip.id}
                     trip={trip}
                     onOpen={() => {
+                      const today = todayDay(trip);
                       setOpenId(trip.id);
-                      setTab("");
-                      setDayId(trip.days[0]?.id || "");
+                      setTab(today ? "days" : "");
+                      setDayId(today?.id || trip.days[0]?.id || "");
                       setStatus("");
                       setError("");
                     }}
@@ -407,6 +418,7 @@ function TripCard({
             </span>
           ) : null}
           <span className="muted">{tripStats(trip)}</span>
+          {timingLabel(tripTiming(trip)) ? <span className="when">{timingLabel(tripTiming(trip))}</span> : null}
         </span>
       </div>
       {confirm ? (
@@ -593,6 +605,12 @@ function Book({
         {spot && activeDay ? (
           <article className="screen reading">
             {spot.badge ? <p className="spot-badge-row"><span className={`badge ${spot.tone}`}>{spot.badge}</span></p> : null}
+            {mapLink(spot) ? (
+              <a className="btn primary nav-go" href={mapLink(spot)} target="_blank" rel="noopener">
+                <Navigation size={18} aria-hidden="true" />
+                導航
+              </a>
+            ) : null}
             {spot.hours || spot.address || spot.price ? (
               <dl className="facts">
                 {spot.hours ? <div><dt>時間</dt><dd>{spot.hours}</dd></div> : null}

@@ -90,6 +90,92 @@ export function tripStats(trip: TripBook): string {
   return bits.join(" · ");
 }
 
+const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+
+export type TripTiming =
+  | { kind: "soon"; days: number }
+  | { kind: "now"; index: number; total: number; dayId: string }
+  | { kind: "done" };
+
+function startOfDay(date: Date): Date {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
+function monthDay(text: string): { month: number; day: number } | null {
+  const english = text.match(/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s*(\d{1,2})\b/i);
+  if (english) return { month: MONTHS.indexOf(english[1].slice(0, 3).toLowerCase()) + 1, day: Number(english[2]) };
+  const compact = text.match(/^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)(\d{1,2})$/i);
+  if (compact) return { month: MONTHS.indexOf(compact[1].slice(0, 3).toLowerCase()) + 1, day: Number(compact[2]) };
+  const chinese = text.match(/(\d{1,2})\s*月\s*(\d{1,2})/);
+  if (chinese) return { month: Number(chinese[1]), day: Number(chinese[2]) };
+  const slash = text.match(/(?:^|[^\d])(\d{1,2})\/(\d{1,2})(?:[^\d]|$)/);
+  if (slash) return { month: Number(slash[1]), day: Number(slash[2]) };
+  return null;
+}
+
+function tripYear(trip: TripBook): number {
+  const found = `${trip.subtitle} ${trip.title} ${trip.footer}`.match(/20\d{2}/);
+  return found ? Number(found[0]) : new Date().getFullYear();
+}
+
+export function dayDates(trip: TripBook): Array<Date | null> {
+  let year = tripYear(trip);
+  let previous: Date | null = null;
+  return trip.days.map((day) => {
+    const parsed = monthDay(`${day.label} ${day.title}`) || monthDay(day.id);
+    if (!parsed || parsed.month < 1 || parsed.day < 1 || parsed.day > 31) return null;
+    let date = new Date(year, parsed.month - 1, parsed.day);
+    if (date.getMonth() !== parsed.month - 1) return null;
+    if (previous && date < previous) {
+      year += 1;
+      date = new Date(year, parsed.month - 1, parsed.day);
+    }
+    previous = date;
+    return date;
+  });
+}
+
+export function tripTiming(trip: TripBook, now = new Date()): TripTiming | null {
+  const dates = dayDates(trip);
+  const known = dates.filter((date): date is Date => date instanceof Date);
+  if (!known.length) return null;
+  const today = startOfDay(now).getTime();
+  const start = startOfDay(known[0]).getTime();
+  const end = startOfDay(known[known.length - 1]).getTime();
+  if (today < start) return { kind: "soon", days: Math.round((start - today) / 86_400_000) };
+  if (today > end) return { kind: "done" };
+  const index = dates.findIndex((date) => date && startOfDay(date).getTime() === today);
+  const day = trip.days[index] || trip.days[0];
+  return { kind: "now", index: Math.max(index, 0), total: trip.days.length, dayId: day.id };
+}
+
+export function todayDay(trip: TripBook, now = new Date()): TripDay | null {
+  const timing = tripTiming(trip, now);
+  if (timing?.kind !== "now") return null;
+  return trip.days.find((day) => day.id === timing.dayId) || null;
+}
+
+export function timingLabel(timing: TripTiming | null): string {
+  if (!timing) return "";
+  if (timing.kind === "soon") return `仲有 ${timing.days} 日`;
+  if (timing.kind === "now") return `今日 · 第 ${timing.index + 1} 日`;
+  return "已結束";
+}
+
+export function mapLink(spot: TripSpot): string {
+  if (typeof DOMParser !== "undefined" && spot.html) {
+    const doc = new DOMParser().parseFromString(spot.html, "text/html");
+    const link = [...doc.querySelectorAll("a")].find((anchor) =>
+      /google\.com\/maps|maps\.app\.goo\.gl/i.test(anchor.getAttribute("href") || ""),
+    );
+    const href = link?.getAttribute("href");
+    if (href) return href;
+  }
+  const query = (spot.address || spot.name).trim();
+  if (!query) return "";
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
+}
+
 function asString(value: unknown, fallback = ""): string {
   return typeof value === "string" ? value : fallback;
 }
