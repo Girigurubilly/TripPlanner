@@ -548,6 +548,7 @@ function Book({
   const [checkTick, setCheckTick] = useState(0);
   const scrollDay = useRef("");
   const pendingSpot = useRef<number | undefined>(undefined);
+  const scrollPlace = useRef("");
   const mainRef = useRef<HTMLElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
 
@@ -576,6 +577,14 @@ function Book({
     target?.scrollIntoView({ behavior: "smooth", block: "start" });
   }, [activeTab]);
 
+  useEffect(() => {
+    if (!scrollPlace.current) return;
+    const label = scrollPlace.current;
+    scrollPlace.current = "";
+    const head = [...document.querySelectorAll("main h2, main h3")].find((el) => (el.textContent || "").includes(label));
+    head?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [activeTab]);
+
   function onContentClick(event: MouseEvent) {
     const target = event.target as HTMLElement;
     const image = target.closest("figure.refimg img");
@@ -588,6 +597,13 @@ function Book({
     if (jump instanceof HTMLElement && jump.dataset.goto) {
       event.preventDefault();
       if (jump.dataset.goto === "transport" && activeDay) scrollDay.current = activeDay.id;
+      if (jump.dataset.goto === "food") {
+        const food = eatGuides.find((guide) => guide.id === "food" || /美食/.test(guide.label)) || eatGuides[0];
+        if (activeDay) scrollPlace.current = cityLabel(activeDay.city);
+        onTab(food?.id || "food");
+        window.scrollTo({ top: 0 });
+        return;
+      }
       onTab(jump.dataset.goto);
       window.scrollTo({ top: 0, behavior: "smooth" });
     }
@@ -1032,7 +1048,33 @@ function shownHtml(html: string): string {
     while (details.firstChild) parent.insertBefore(details.firstChild, details);
     details.remove();
   }
+  linkFoodMentions(root);
   return root.innerHTML;
+}
+
+function linkFoodMentions(root: HTMLElement) {
+  const nodes: Text[] = [];
+  const walker = root.ownerDocument.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  while (walker.nextNode()) nodes.push(walker.currentNode as Text);
+  for (const node of nodes) {
+    if (node.parentElement?.closest("a")) continue;
+    const text = node.nodeValue || "";
+    if (!text.includes("「美食咖啡」")) continue;
+    const frag = node.ownerDocument.createDocumentFragment();
+    const parts = text.split("「美食咖啡」");
+    parts.forEach((part, index) => {
+      if (part) frag.append(part);
+      if (index === parts.length - 1) return;
+      frag.append("「");
+      const link = node.ownerDocument.createElement("a");
+      link.href = "#";
+      link.dataset.goto = "food";
+      link.textContent = "美食咖啡";
+      frag.append(link);
+      frag.append("」");
+    });
+    node.parentNode?.replaceChild(frag, node);
+  }
 }
 
 function spotHtml(html: string, name: string): string {
