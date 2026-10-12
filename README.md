@@ -1,28 +1,12 @@
-# Trip Canvas
+# 行程書
 
-Personal travel planner: turn a saved-place list into a realistic, map-based day-by-day itinerary. Everything stays in the browser (`localStorage`) until you export a backup. No API keys.
+手機優先的行程閱讀器。上傳一份行程 JSON，每日行程、交通、攝影、美食、手信同實用資訊就喺呢部瀏覽器入面睇。內容同筆記只存在呢部機，唔會上傳到伺服器。
 
-Repository: [github.com/Girigurubilly/TripPlanner](https://github.com/Girigurubilly/TripPlanner)
+## 本地開發
 
-GitHub Pages URL (after enabling Pages below): [girigurubilly.github.io/TripPlanner](https://girigurubilly.github.io/TripPlanner/)
+```bash
+npm install
+npm run dev
+```
 
-## Enable GitHub Pages (one time)
-
-The built site is already on the `gh-pages` branch. In the repo:
-
-1. Open [Settings → Pages](https://github.com/Girigurubilly/TripPlanner/settings/pages)
-2. **Branch**: `gh-pages` / `/ (root)`
-3. Save
-
-The site is then at `https://girigurubilly.github.io/TripPlanner/`. Later pushes to `main` rebuild and update that branch.
-
-## Features
-
-- Multi-city trips with hotels, pace, and transport
-- Destination search across cities **and ~7,900 world airports** (IATA)
-- Time zone picker and time fields you can pick *or* type
-- Places hub, drag-and-drop daily plan, daily map, bookings, insights
-- English, 繁體中文, 简体中文, 日本語
-- Delete any trip; JSON backup / restore
-
-Airport catalogue is derived from [mwgg/Airports](https://github.com/mwgg/Airports) (OurAirports data). Time zones use the IANA list from the browser.
+預設開發網址係 `http://127.0.0.1:8080/`。

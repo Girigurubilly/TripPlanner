@@ -1,18 +1,12 @@
 import { createRouter } from "@tanstack/react-router";
 import { AppErrorComponent } from "@/lib/error-component";
+import { previewPathRewrite } from "@/lib/preview-path-prefix";
 import { routeTree } from "./routeTree.gen";
 
-function appBasepath() {
-  const raw = import.meta.env.BASE_URL || "/";
-  const trimmed = raw.replace(/\/$/, "");
-  return trimmed || "/";
-}
-
 export function getRouter() {
-  const basepath = appBasepath();
   return createRouter({
     routeTree,
+    rewrite: previewPathRewrite(),
     defaultErrorComponent: AppErrorComponent,
-    ...(basepath !== "/" ? { basepath } : {}),
   });
 }

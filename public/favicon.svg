@@ -1,6 +1,8 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
-  <rect width="32" height="32" rx="7" fill="#21564A"/>
-  <rect x="6.5" y="6.5" width="19" height="14.5" rx="1.6" fill="#FFFCF6"/>
-  <path fill="#1C1915" d="M16 11.4c1.5 0 2.7 1.2 2.7 2.7 0 2.2-2.7 5.2-2.7 5.2s-2.7-3-2.7-5.2c0-1.5 1.2-2.7 2.7-2.7z"/>
-  <circle cx="16" cy="14.1" r="1.05" fill="#FFFCF6"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="行程書">
+  <rect width="32" height="32" rx="7" fill="#1e3a5f"/>
+  <rect x="6" y="5.5" width="20" height="21" rx="2" fill="#faf7f0"/>
+  <rect x="15" y="5.5" width="2" height="21" fill="#b3541e"/>
+  <rect x="8.6" y="10" width="4.6" height="1.5" rx="0.75" fill="#2b2620"/>
+  <rect x="8.6" y="13.4" width="3.4" height="1.5" rx="0.75" fill="#2b2620"/>
+  <circle cx="21" cy="16.5" r="2.3" fill="#1e6f6f"/>
 </svg>
