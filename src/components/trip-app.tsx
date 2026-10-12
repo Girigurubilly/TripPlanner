@@ -1116,10 +1116,13 @@ function presentSpot(spot: TripSpot): { hours: string; address: string; price: s
     } else if (!address && text.includes("地址")) {
       address = afterLabel(text, "地址");
       li.remove();
-    } else if (!price && /門票|價錢|人均/.test(text)) {
-      const label = text.includes("門票") ? "門票" : text.includes("人均") ? "人均" : "價錢";
-      price = afterLabel(text, label);
-      li.remove();
+    } else if (!price && /門票|票價|費用|價錢|人均/.test(text)) {
+      const label = text.includes("門票") ? "門票" : text.includes("票價") ? "票價" : text.includes("費用") ? "費用" : text.includes("人均") ? "人均" : "價錢";
+      const value = afterLabel(text, label);
+      if (/免費|免票|¥|€|\$/.test(value)) {
+        price = value;
+        li.remove();
+      }
     }
   }
   root.querySelectorAll("ul, ol").forEach((list) => {

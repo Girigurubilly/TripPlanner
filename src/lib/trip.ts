@@ -219,6 +219,69 @@ function sanitizeHtml(html: string): string {
   return doc.body.innerHTML;
 }
 
+function cleanFact(value: string): string {
+  return value.replace(/\s+/g, " ").replace(/^[：:\s]+/, "").trim();
+}
+
+function valueAfter(text: string, labels: string[]): string {
+  for (const label of labels) {
+    const at = text.indexOf(label);
+    if (at >= 0) return cleanFact(text.slice(at + label.length));
+  }
+  return "";
+}
+
+export function fillSpotFacts(
+  html: string,
+  current: { hours: string; address: string; price: string },
+): { hours: string; address: string; price: string; html: string } {
+  if (!html || typeof DOMParser === "undefined") return { ...current, html };
+  const doc = new DOMParser().parseFromString(`<div id="facts">${html}</div>`, "text/html");
+  const root = doc.getElementById("facts");
+  if (!root) return { ...current, html };
+  const deep = [...root.querySelectorAll(".deep")];
+  deep.forEach((node) => node.remove());
+  let hours = current.hours;
+  let address = current.address;
+  let price = current.price;
+  for (const el of [...root.querySelectorAll("li, p")]) {
+    if (!(el instanceof HTMLElement) || el.querySelector("li, p")) continue;
+    const text = (el.textContent || "").replace(/\s+/g, " ").trim();
+    if (!text) continue;
+    if (!hours && /開放時間|營業時間/.test(text)) {
+      hours = valueAfter(text, ["開放時間", "營業時間"]);
+      el.remove();
+      continue;
+    }
+    if (!address && text.indexOf("地址") >= 0 && text.indexOf("地址") < 12) {
+      address = valueAfter(text, ["地址"]);
+      el.remove();
+      continue;
+    }
+    if (!price && /門票|票價|費用|價錢|人均/.test(text)) {
+      const value = valueAfter(text, ["門票", "票價", "費用", "價錢", "人均"]);
+      if (value && /免費|免票|¥|€|\$/.test(value)) {
+        price = value;
+        el.remove();
+      }
+    }
+  }
+  if (!hours) {
+    for (const el of [...root.querySelectorAll("li")]) {
+      const text = (el.textContent || "").replace(/\s+/g, " ").trim();
+      const time = text.match(/(\d{1,2}:\d{2}\s*[–\-至到]\s*\d{1,2}:\d{2})/);
+      if (!time || !/時段|開門|亮燈|開放|營業/.test(text)) continue;
+      hours = time[1].replace(/\s+/g, "");
+      break;
+    }
+  }
+  if (!hours && /24\s*小時|通宵/.test(`${root.textContent || ""} ${deep.map((node) => node.textContent || "").join(" ")}`)) {
+    hours = "24小時";
+  }
+  deep.forEach((node) => root.append(node));
+  return { hours, address, price, html: root.innerHTML };
+}
+
 function normalizeTone(tone: string): string {
   const value = tone.trim().toLowerCase();
   if (value === "ok" || value === "yes" || value === "go") return "ok";
@@ -262,14 +325,20 @@ function parseDay(value: unknown, index: number): TripDay {
         if (!name) name = summary?.querySelector(".spotname")?.textContent?.trim() || "";
         if (!badge) badge = summary?.querySelector(".badge")?.textContent?.trim() || "";
       }
+      const html = sanitizeHtml(rawHtml);
+      const facts = fillSpotFacts(html, {
+        hours: asString(item.hours).trim(),
+        address: asString(item.address).trim(),
+        price: asString(item.price).trim(),
+      });
       return {
         name,
         badge,
         tone: normalizeTone(asString(item.tone)),
-        hours: asString(item.hours).trim(),
-        address: asString(item.address).trim(),
-        price: asString(item.price).trim(),
-        html: sanitizeHtml(rawHtml),
+        hours: facts.hours,
+        address: facts.address,
+        price: facts.price,
+        html: facts.html,
       };
     }),
   };
