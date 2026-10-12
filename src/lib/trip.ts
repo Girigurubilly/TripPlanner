@@ -59,6 +59,9 @@ const CITY_LABEL: Record<string, string> = {
 const TRIPS_KEY = "tripbooks.v1";
 const NOTES_KEY = "tripnotes.v1";
 const UI_KEY = "tripui.v1";
+const EDIT_KEY = "tripbook-local-edited";
+
+export type NoteMap = Record<string, Record<string, string>>;
 
 export function cityLabel(city: string): string {
   return CITY_LABEL[city] || city;
@@ -232,8 +235,25 @@ export function loadTrips(): TripBook[] {
   }
 }
 
-export function saveTrips(trips: TripBook[]): void {
+export function touchLocalEdit(iso = new Date().toISOString()): void {
+  try {
+    localStorage.setItem(EDIT_KEY, iso);
+  } catch {
+    /* ignore */
+  }
+}
+
+export function localEditedAt(): string {
+  try {
+    return localStorage.getItem(EDIT_KEY) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+export function saveTrips(trips: TripBook[], opts?: { silent?: boolean }): void {
   localStorage.setItem(TRIPS_KEY, JSON.stringify(trips));
+  if (!opts?.silent) touchLocalEdit();
 }
 
 export function upsertTrips(current: TripBook[], incoming: TripBook[]): {
@@ -269,8 +289,6 @@ export function deleteTrip(current: TripBook[], id: string): TripBook[] {
   return trips;
 }
 
-type NoteMap = Record<string, Record<string, string>>;
-
 function loadAllNotes(): NoteMap {
   try {
     const raw = localStorage.getItem(NOTES_KEY);
@@ -282,6 +300,16 @@ function loadAllNotes(): NoteMap {
   }
 }
 
+export function exportNotes(): NoteMap {
+  return loadAllNotes();
+}
+
+export function replaceLibrary(trips: TripBook[], notes: NoteMap, editedAt: string): void {
+  saveTrips(trips, { silent: true });
+  localStorage.setItem(NOTES_KEY, JSON.stringify(notes));
+  touchLocalEdit(editedAt);
+}
+
 export function loadNote(tripId: string, dayId: string): string {
   return loadAllNotes()[tripId]?.[dayId] || "";
 }
@@ -290,6 +318,7 @@ export function saveNote(tripId: string, dayId: string, value: string): void {
   const notes = loadAllNotes();
   notes[tripId] = { ...(notes[tripId] || {}), [dayId]: value };
   localStorage.setItem(NOTES_KEY, JSON.stringify(notes));
+  touchLocalEdit();
 }
 
 export type TripUi = { openId: string; tab: string; dayId: string };

@@ -32,6 +32,7 @@ import {
   type TripBook,
   type TripDay,
 } from "@/lib/trip";
+import { DrivePanel } from "@/components/drive-panel";
 import { AI_TRIP_PROMPT } from "@/lib/ai-prompt";
 
 const TAB_ICON: Record<string, LucideIcon> = {
@@ -90,7 +91,9 @@ export function TripApp() {
     const stored = loadTrips();
     const ui = loadUi();
     setTrips(stored);
-    if (ui.openId && stored.some((trip) => trip.id === ui.openId)) {
+    const returning =
+      window.location.hash.includes("access_token") || window.location.hash.includes("error=");
+    if (!returning && ui.openId && stored.some((trip) => trip.id === ui.openId)) {
       setOpenId(ui.openId);
       setTab(ui.tab);
       setDayId(ui.dayId);
@@ -199,7 +202,7 @@ export function TripApp() {
               >
                 <Upload size={28} aria-hidden="true" />
                 <strong>上傳行程 JSON</strong>
-                <span>內容同筆記只留喺呢部機，唔會上載</span>
+                <span>內容同筆記留喺呢部機，可以再同步去 Google Drive</span>
               </button>
             </section>
           ) : (
@@ -240,6 +243,7 @@ export function TripApp() {
           {promptFallback ? (
             <textarea className="prompt-box" readOnly value={AI_TRIP_PROMPT} />
           ) : null}
+          <DrivePanel onLibraryChange={() => setTrips(loadTrips())} />
           <details className="format">
             <summary>行程檔格式</summary>
             <p className="tiny">
@@ -584,8 +588,11 @@ function foldByHeading(root: HTMLElement, tag: string) {
     if (!head.parentElement || head.closest("details")) continue;
     const details = document.createElement("details");
     details.className = "spot";
+    const row = document.createElement("span");
+    row.className = "spot-row";
+    row.textContent = chipTitle(headingLabel(head)) || "詳情";
     const summary = document.createElement("summary");
-    summary.textContent = chipTitle(headingLabel(head)) || "詳情";
+    summary.append(row);
     const body = document.createElement("div");
     body.className = "spotbody";
     head.parentElement.insertBefore(details, head);
@@ -608,8 +615,11 @@ function foldPlaces(root: HTMLElement) {
     if (!(name instanceof HTMLElement) || name.tagName !== "P") continue;
     const details = document.createElement("details");
     details.className = "spot";
+    const row = document.createElement("span");
+    row.className = "spot-row";
+    row.textContent = (name.textContent || "").replace(/\s+/g, " ").trim() || "詳情";
     const summary = document.createElement("summary");
-    summary.textContent = (name.textContent || "").replace(/\s+/g, " ").trim() || "詳情";
+    summary.append(row);
     const body = document.createElement("div");
     body.className = "spotbody";
     name.replaceWith(details);
@@ -705,6 +715,27 @@ function GuidePane({ html }: { html: string }) {
       ) : null}
     </>
   );
+}
+
+function nestDeep(html: string): string {
+  if (!html.includes("deep") || typeof DOMParser === "undefined") return html;
+  const doc = new DOMParser().parseFromString(`<div id="spot-html">${html}</div>`, "text/html");
+  const root = doc.getElementById("spot-html");
+  if (!root) return html;
+  for (const box of [...root.querySelectorAll(".deep")]) {
+    if (!(box instanceof HTMLElement) || box.tagName === "DETAILS") continue;
+    const heading = box.querySelector("h4, h3");
+    const details = document.createElement("details");
+    details.className = "deep";
+    const summary = document.createElement("summary");
+    summary.textContent = (heading?.textContent || "深度導覽").replace(/\s+/g, " ").trim();
+    heading?.remove();
+    const body = document.createElement("div");
+    while (box.firstChild) body.append(box.firstChild);
+    details.append(summary, body);
+    box.replaceWith(details);
+  }
+  return root.innerHTML;
 }
 
 function DayPane({
@@ -804,11 +835,13 @@ function DayPane({
         {day.spots.map((spot, spotIndex) => (
           <details className="spot" key={`${spot.name}-${openAll ? "open" : "shut"}`} {...(openAll ? { open: true } : {})}>
             <summary>
-              <span className="spot-index">{spotIndex + 1}</span>
-              <span className="spotname">{spot.name}</span>
-              {spot.badge ? <span className={`badge ${spot.tone}`}>{spot.badge}</span> : null}
+              <span className="spot-row">
+                <span className="spot-index">{spotIndex + 1}</span>
+                <span className="spotname">{spot.name}</span>
+                {spot.badge ? <span className={`badge ${spot.tone}`}>{spot.badge}</span> : null}
+              </span>
             </summary>
-            <div className="spotbody" dangerouslySetInnerHTML={{ __html: spot.html }} />
+            <div className="spotbody" dangerouslySetInnerHTML={{ __html: nestDeep(spot.html) }} />
           </details>
         ))}
         <DayNotes tripId={trip.id} dayId={day.id} />
