@@ -680,7 +680,7 @@ function GuidePane({ html }: { html: string }) {
 
   return (
     <>
-      {parsed.lead ? <div dangerouslySetInnerHTML={{ __html: parsed.lead }} /> : null}
+      {parsed.lead ? <div className="guide-lead" dangerouslySetInnerHTML={{ __html: parsed.lead }} /> : null}
       {many ? (
         <div className="pills guide-pills" ref={stripRef} role="tablist" aria-label="分段">
           {parsed.slices.map((item, itemIndex) => (
@@ -825,10 +825,11 @@ function DayPane({
           const key = `${spotIndex}-${spot.name}`;
           const shown = openAll || Boolean(openSpots[key]);
           return (
-            <div className="spot" key={key}>
-              <button
-                className="spot-toggle"
-                type="button"
+            <div className={`spot${shown ? " open" : ""}`} key={key}>
+              <div
+                className="spot-hit"
+                role="button"
+                tabIndex={0}
                 aria-expanded={shown}
                 onClick={() => {
                   if (openAll) {
@@ -843,13 +844,17 @@ function DayPane({
                   }
                   setOpenSpots((current) => ({ ...current, [key]: !current[key] }));
                 }}
+                onKeyDown={(event) => {
+                  if (event.key !== "Enter" && event.key !== " ") return;
+                  event.preventDefault();
+                  event.currentTarget.click();
+                }}
               >
-                <span className="spot-row">
-                  <span className="spot-index">{spotIndex + 1}</span>
-                  <span className="spotname">{spot.name}</span>
-                  {spot.badge ? <span className={`badge ${spot.tone}`}>{spot.badge}</span> : null}
-                </span>
-              </button>
+                <span className="spot-index">{spotIndex + 1}</span>
+                <span className="spotname">{spot.name}</span>
+                {spot.badge ? <span className={`badge ${spot.tone}`}>{spot.badge}</span> : null}
+                <span className="spot-chev" aria-hidden="true" />
+              </div>
               {shown ? <div className="spotbody" dangerouslySetInnerHTML={{ __html: spot.html }} /> : null}
             </div>
           );

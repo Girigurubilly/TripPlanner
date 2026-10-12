@@ -29,7 +29,7 @@
   --shadow: 0 2px 10px rgba(80, 60, 30, 0.06);
   --radius: 14px;
   --radius-sm: 10px;
-  --font: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", system-ui, sans-serif;
+  --font: "PingFang HK", "PingFang TC", "Noto Sans TC", "Heiti TC", system-ui, sans-serif;
   --motion-fast: 180ms;
   --ease: cubic-bezier(0.22, 1, 0.36, 1);
 }
@@ -471,16 +471,17 @@ summary:focus-visible {
   font-weight: 650;
 }
 .spot-index {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+  display: inline-block;
   width: 26px;
   height: 26px;
+  margin-right: 8px;
   border-radius: 999px;
   background: var(--navy);
   color: #fff;
   font-size: 0.78rem;
-  flex: 0 0 auto;
+  line-height: 26px;
+  text-align: center;
+  vertical-align: middle;
 }
 details.spot > summary {
   display: list-item;
@@ -492,44 +493,36 @@ details.spot > summary::-webkit-details-marker {
   display: none;
 }
 button.spot-toggle {
+  display: none;
+}
+.spot-hit {
   display: block;
-  width: 100%;
-  margin: 0;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  text-align: left;
-  appearance: none;
-  cursor: pointer;
-}
-.spot-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  width: 100%;
-  min-height: 44px;
-  padding: 14px 16px;
-  box-sizing: border-box;
+  position: relative;
+  padding: 14px 40px 14px 16px;
   font-weight: 700;
+  line-height: 1.45;
 }
-details.spot > summary:hover .spot-row,
-.spot-row:hover {
+.spot-hit:hover {
   background: #fdf6ec;
 }
-.spot-row::after {
-  content: "";
-  margin-left: auto;
+.spot-chev {
+  position: absolute;
+  right: 16px;
+  top: 50%;
   width: 8px;
   height: 8px;
+  margin-top: -6px;
   border-right: 2px solid var(--muted);
   border-bottom: 2px solid var(--muted);
   transform: rotate(45deg);
-  flex: 0 0 auto;
 }
-details.spot[open] > summary .spot-row::after {
-  transform: rotate(-135deg) translateY(-2px);
+.spot.open .spot-chev {
+  transform: rotate(-135deg);
+  margin-top: -2px;
+}
+.spot-row {
+  display: block;
+  padding: 14px 16px;
 }
 .rationale summary {
   cursor: pointer;
@@ -577,19 +570,36 @@ details.spot[open] > summary .spot-row::after {
   flex-direction: row;
   align-items: center;
   justify-content: center;
-  min-height: 44px;
+  min-height: 48px;
+  height: auto;
   min-width: 0;
-  max-width: 196px;
+  max-width: 12em;
   border-top-width: 1px;
   padding: 8px 12px;
 }
 .pill.text-pill .pill-hint {
   color: inherit;
-  font-size: 0.86rem;
+  font-size: 1rem;
   font-weight: 650;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  line-height: 1.35;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+}
+.guide-lead {
+  margin: 0 0 8px;
+  color: #1c1814;
+  font-size: 1.0625rem;
+  line-height: 1.8;
+}
+.guide-read {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 16px 14px 6px;
+  color: #1c1814;
+  font-size: 1.0625rem;
+  line-height: 1.8;
 }
 .guide-pills {
   position: sticky;
@@ -602,17 +612,11 @@ details.spot[open] > summary .spot-row::after {
 #guide-body {
   scroll-margin-top: 168px;
 }
-.guide-read {
-  background: #fff;
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  padding: 14px 14px 4px;
-}
 .guide-read .kicker {
   margin: 16px 0 8px;
-  font-size: 1rem;
+  font-size: 1.125rem;
   font-weight: 700;
-  line-height: 1.4;
+  line-height: 1.45;
   color: var(--navy);
 }
 .guide-read .kicker:first-child {
@@ -620,8 +624,9 @@ details.spot[open] > summary .spot-row::after {
 }
 .guide-read p,
 .guide-read li {
-  font-size: 0.98rem;
-  line-height: 1.7;
+  font-size: 1.0625rem;
+  line-height: 1.8;
+  color: #1c1814;
 }
 .guide-read p {
   margin: 0 0 12px;
@@ -644,9 +649,10 @@ details.spot[open] > summary .spot-row::after {
 }
 .guide-read li {
   position: relative;
-  margin: 0 0 8px;
-  padding: 10px 12px;
-  background: #faf7f0;
+  margin: 0 0 10px;
+  padding: 12px 14px;
+  background: #fff;
+  border: 1px solid var(--line);
   border-radius: 10px;
 }
 .guide-read ol > li {
@@ -971,18 +977,25 @@ details.spot > summary {
   font-weight: 700;
 }
 .spotname {
-  flex: 1;
-  min-width: 8rem;
+  display: inline;
+  margin-right: 6px;
+  vertical-align: middle;
 }
 .spotbody {
-  padding: 0 16px 16px;
+  padding: 4px 16px 16px;
+  color: #1c1814;
+  font-size: 1.0625rem;
+  line-height: 1.8;
 }
 .badge {
-  font-size: 0.78rem;
+  display: inline-block;
+  vertical-align: middle;
+  margin-top: 4px;
+  font-size: 0.85rem;
   font-weight: 650;
   border-radius: 999px;
   padding: 3px 10px;
-  white-space: nowrap;
+  white-space: normal;
 }
 .badge.ok {
   background: var(--ok-bg);
@@ -1111,22 +1124,24 @@ details.spot > summary {
     background: #fff;
   }
   .book table.stackable td {
-    display: grid;
-    grid-template-columns: minmax(92px, 40%) 1fr;
-    gap: 8px;
+    display: block;
     border: 0;
     border-bottom: 1px solid var(--line);
-    padding: 8px 0;
-    font-size: 0.86rem;
+    padding: 10px 0;
+    font-size: 1.05rem;
+    line-height: 1.65;
+    color: #1c1814;
   }
   .book table.stackable tr td:last-child {
     border-bottom: 0;
   }
   .book table.stackable td::before {
     content: attr(data-label);
-    color: var(--muted);
-    font-weight: 650;
-    font-size: 0.75rem;
+    display: block;
+    margin-bottom: 2px;
+    color: #5c4a38;
+    font-weight: 700;
+    font-size: 0.95rem;
   }
 }
 
