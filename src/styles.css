@@ -1079,6 +1079,34 @@ li.is-booked {
   margin: 0 0 14px;
   font-size: 16px;
 }
+.search-input {
+  flex: 1;
+  min-width: 0;
+  height: 40px;
+  border: 0;
+  border-radius: 999px;
+  background: #fff;
+  padding: 0 14px;
+  font: inherit;
+  color: var(--ink);
+}
+.search-hint {
+  margin: 8px 2px 12px;
+}
+.booked-line {
+  display: inline-flex;
+  margin: 0 0 12px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: #e7f3ef;
+  color: var(--teal);
+  font-weight: 700;
+}
+  width: 100%;
+  min-height: 48px;
+  margin: 0 0 14px;
+  font-size: 16px;
+}
 .facts div {
   display: grid;
   grid-template-columns: 3.2em minmax(0, 1fr);

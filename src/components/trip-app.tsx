@@ -14,6 +14,7 @@ import {
   Trash2,
   Upload,
   Navigation,
+  Search,
   type LucideIcon,
 } from "lucide-react";
 import {
@@ -102,6 +103,7 @@ function bookingBox(tripId: string, key: string, on: boolean, mark: Element): HT
   input.addEventListener("change", () => {
     writeCheck(tripId, key, input.checked);
     mark.classList.toggle("is-booked", input.checked);
+    window.dispatchEvent(new Event("trip-checks"));
   });
   return input;
 }
@@ -143,6 +145,85 @@ function mountBookingChecks(root: HTMLElement, tripId: string, allRows: boolean)
     el.prepend(label);
   });
   labelTables(root);
+}
+
+function collectBookingKeys(root: ParentNode, allRows: boolean, into: Set<string>) {
+  root.querySelectorAll("table").forEach((table) => {
+    table.querySelectorAll("tbody tr").forEach((row) => {
+      const name = (row.querySelector("td")?.textContent || "").replace(/\s+/g, " ").trim();
+      const blob = (row.textContent || "").replace(/\s+/g, " ").trim();
+      if (!name) return;
+      if (!allRows && !isBookingRow(blob)) return;
+      into.add(name.slice(0, 96));
+    });
+  });
+  root.querySelectorAll("p, li").forEach((el) => {
+    if (!(el instanceof HTMLElement)) return;
+    if (el.closest("table") || el.querySelector("p, li, table")) return;
+    const text = (el.textContent || "").replace(/\s+/g, " ").trim();
+    if (text.length < 4 || text.length > 280 || !isBookingLine(text)) return;
+    into.add(text.slice(0, 96));
+  });
+}
+
+function htmlRoot(html: string): HTMLElement | null {
+  const doc = new DOMParser().parseFromString(`<div id="keys">${html}</div>`, "text/html");
+  return doc.getElementById("keys");
+}
+
+function bookingKeys(trip: TripBook): string[] {
+  if (typeof DOMParser === "undefined") return [];
+  const keys = new Set<string>();
+  const html = shownHtml(trip.overviewHtml);
+  const parts = splitOverview(html);
+  if (!parts.rest.length) {
+    const root = htmlRoot(html);
+    if (root) collectBookingKeys(root, sectionIsBooking(html), keys);
+  } else {
+    const lead = htmlRoot(parts.lead);
+    const first = htmlRoot(parts.first);
+    if (lead) collectBookingKeys(lead, false, keys);
+    if (first) collectBookingKeys(first, sectionIsBooking(parts.first), keys);
+    for (const section of parts.rest) {
+      const root = htmlRoot(section.html);
+      if (root) collectBookingKeys(root, /預訂|預約/.test(section.title), keys);
+    }
+  }
+  for (const day of trip.days) {
+    const root = htmlRoot(`${day.leadHtml}${day.walkHtml}${day.foodHtml}${day.noteHtml}`);
+    if (root) collectBookingKeys(root, false, keys);
+  }
+  return [...keys];
+}
+
+function bookingProgress(trip: TripBook): { done: number; total: number } {
+  const keys = bookingKeys(trip);
+  const checks = loadChecks(trip.id);
+  return { done: keys.filter((key) => checks[key]).length, total: keys.length };
+}
+
+function plainText(html: string): string {
+  return html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+}
+
+type SearchHit = { dayId: string; spot: number; title: string; meta: string };
+
+function searchTrip(trip: TripBook, query: string): SearchHit[] {
+  const needle = query.trim().toLowerCase();
+  if (needle.length < 1) return [];
+  const hits: SearchHit[] = [];
+  for (const day of trip.days) {
+    if (`${day.label} ${day.title}`.toLowerCase().includes(needle)) {
+      hits.push({ dayId: day.id, spot: -1, title: day.title || day.label, meta: day.label });
+    }
+    day.spots.forEach((spot, index) => {
+      const blob = `${spot.name} ${spot.badge} ${spot.hours} ${spot.address} ${spot.price} ${plainText(spot.html)}`.toLowerCase();
+      if (!blob.includes(needle)) return;
+      hits.push({ dayId: day.id, spot: index, title: spot.name, meta: `${day.label}${spot.badge ? ` · ${spot.badge}` : ""}` });
+    });
+  }
+  hits.sort((a, b) => Number(!(a.spot >= 0 && a.title.toLowerCase().includes(needle))) - Number(!(b.spot >= 0 && b.title.toLowerCase().includes(needle))));
+  return hits.slice(0, 40);
 }
 
 export function TripApp() {
@@ -401,6 +482,7 @@ function TripCard({
   const [confirm, setConfirm] = useState(false);
   const cover = coverOf(trip);
   const cities = [...new Set(trip.days.map((day) => day.city).filter(Boolean))];
+  const progress = bookingProgress(trip);
   return (
     <article className="trip-tile">
       <div className="trip-open" onClick={onOpen}>
@@ -419,6 +501,7 @@ function TripCard({
           ) : null}
           <span className="muted">{tripStats(trip)}</span>
           {timingLabel(tripTiming(trip)) ? <span className="when">{timingLabel(tripTiming(trip))}</span> : null}
+          {progress.total ? <span className="muted">已訂 {progress.done}／{progress.total}</span> : null}
         </span>
       </div>
       {confirm ? (
@@ -463,8 +546,13 @@ function Book({
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [spotAt, setSpotAt] = useState<number | null>(null);
   const [topicAt, setTopicAt] = useState<number | null>(null);
+  const [searching, setSearching] = useState(false);
+  const [query, setQuery] = useState("");
+  const [checkTick, setCheckTick] = useState(0);
   const scrollDay = useRef("");
+  const pendingSpot = useRef<number | undefined>(undefined);
   const mainRef = useRef<HTMLElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!lightbox) return;
@@ -520,12 +608,27 @@ function Book({
         : "overview";
 
   useEffect(() => {
-    setSpotAt(null);
+    if (pendingSpot.current === undefined) {
+      setSpotAt(null);
+      return;
+    }
+    setSpotAt(pendingSpot.current >= 0 ? pendingSpot.current : null);
+    pendingSpot.current = undefined;
   }, [activeDay?.id]);
 
   useEffect(() => {
     setTopicAt(null);
   }, [activeTab, trip.id]);
+
+  useEffect(() => {
+    const refresh = () => setCheckTick((value) => value + 1);
+    window.addEventListener("trip-checks", refresh);
+    return () => window.removeEventListener("trip-checks", refresh);
+  }, []);
+
+  useEffect(() => {
+    if (searching) searchRef.current?.focus();
+  }, [searching]);
 
   const openGuide = guideIds.has(activeTab) && !eatIds.has(activeTab) ? trip.guides.find((guide) => guide.id === activeTab) : undefined;
   const openEat = eatIds.has(activeTab) ? trip.guides.find((guide) => guide.id === activeTab) || eatGuides[0] : undefined;
@@ -541,6 +644,8 @@ function Book({
   const guideParsed = useMemo(() => (openGuide ? guideSlices(openGuide.html) : null), [openGuide]);
   const topic = guideParsed && topicAt !== null ? guideParsed.slices[topicAt] : undefined;
   const topicHtml = useMemo(() => (topic ? presentSlice(topic.html) : ""), [topic]);
+  const progress = useMemo(() => bookingProgress(trip), [trip, checkTick]);
+  const hits = useMemo(() => (searching ? searchTrip(trip, query) : []), [searching, trip, query]);
   const spot = activeDay && spotAt !== null ? activeDay.spots[spotAt] : undefined;
   const spotBody = useMemo(() => (spot ? spotHtml(spot.html, spot.name) : ""), [spot]);
   let screenTitle = trip.title;
@@ -553,7 +658,26 @@ function Book({
   else if (rootTab === "guides") screenTitle = "指南";
   else screenTitle = "總覽";
 
+  function openHit(hit: SearchHit) {
+    pendingSpot.current = hit.spot;
+    setSearching(false);
+    setQuery("");
+    onTab("days");
+    if (hit.dayId === activeDay?.id) {
+      setSpotAt(hit.spot >= 0 ? hit.spot : null);
+      pendingSpot.current = undefined;
+    } else {
+      onDay(hit.dayId);
+    }
+    window.scrollTo({ top: 0 });
+  }
+
   function goBack() {
+    if (searching) {
+      setSearching(false);
+      setQuery("");
+      return;
+    }
     if (spotAt !== null) {
       setSpotAt(null);
       return;
@@ -570,6 +694,8 @@ function Book({
   }
 
   function openDock(id: string) {
+    setSearching(false);
+    setQuery("");
     setSpotAt(null);
     setTopicAt(null);
     onTab(id);
@@ -579,10 +705,25 @@ function Book({
   return (
     <div className="app book app-shell" onClick={onContentClick}>
       <header className="topbar">
-        <button className="icon-btn" type="button" aria-label={spot || topic || openGuide ? "返回" : "返回行程庫"} onClick={goBack}>
+        <button className="icon-btn" type="button" aria-label={searching || spot || topic || openGuide ? "返回" : "返回行程庫"} onClick={goBack}>
           <ChevronLeft size={20} aria-hidden="true" />
         </button>
-        <p className="top-title">{screenTitle}</p>
+        {searching ? (
+          <input
+            ref={searchRef}
+            className="search-input"
+            value={query}
+            placeholder="搵景點、日子、預約"
+            onChange={(event) => setQuery(event.target.value)}
+          />
+        ) : (
+          <p className="top-title">{screenTitle}</p>
+        )}
+        {searching ? null : (
+          <button className="icon-btn" type="button" aria-label="搜尋" onClick={() => setSearching(true)}>
+            <Search size={18} aria-hidden="true" />
+          </button>
+        )}
         <button className="icon-btn" type="button" aria-label="匯出 JSON" onClick={() => downloadTrip(trip)}>
           <Download size={18} aria-hidden="true" />
         </button>
@@ -602,7 +743,25 @@ function Book({
         </div>
       ) : null}
       <main ref={mainRef}>
-        {spot && activeDay ? (
+        {searching ? (
+          <section className="screen">
+            {!query.trim() ? <p className="muted search-hint">輸入景點、餐廳或者日期</p> : null}
+            {query.trim() && !hits.length ? <p className="muted search-hint">冇搵到「{query.trim()}」</p> : null}
+            <div className="sheet">
+              {hits.map((hit) => (
+                <div className="navrow" key={`${hit.dayId}-${hit.spot}-${hit.title}`} onClick={() => openHit(hit)}>
+                  <span className="navrow-main">
+                    <strong>{hit.title}</strong>
+                    <span className="pill-hint">{hit.meta}</span>
+                  </span>
+                  <span className="navrow-go" aria-hidden="true">›</span>
+                </div>
+              ))}
+            </div>
+          </section>
+        ) : null}
+
+        {!searching && spot && activeDay ? (
           <article className="screen reading">
             {spot.badge ? <p className="spot-badge-row"><span className={`badge ${spot.tone}`}>{spot.badge}</span></p> : null}
             {mapLink(spot) ? (
@@ -622,16 +781,17 @@ function Book({
           </article>
         ) : null}
 
-        {!spot && rootTab === "overview" ? (
+        {!searching && !spot && rootTab === "overview" ? (
           <article className="screen reading">
             <h1 className="screen-title">{trip.title}</h1>
             {trip.subtitle ? <p className="lede">{trip.subtitle}</p> : null}
             {trip.tagline ? <p className="lede">{trip.tagline}</p> : null}
+            {progress.total ? <p className="booked-line">已訂 {progress.done}／{progress.total}</p> : null}
             <Overview html={trip.overviewHtml} tripId={trip.id} />
           </article>
         ) : null}
 
-        {!spot && rootTab === "days" && activeDay ? (
+        {!searching && !spot && rootTab === "days" && activeDay ? (
           <DayScreen
             trip={trip}
             day={activeDay}
@@ -647,9 +807,9 @@ function Book({
           />
         ) : null}
 
-        {!spot && rootTab === "transport" ? <Transport trip={trip} /> : null}
+        {!searching && !spot && rootTab === "transport" ? <Transport trip={trip} /> : null}
 
-        {!spot && rootTab === "eat" && openEat ? (
+        {!searching && !spot && rootTab === "eat" && openEat ? (
           <section className="screen">
             <div className="segment">
               {eatGuides.map((guide) => (
@@ -682,7 +842,7 @@ function Book({
           </section>
         ) : null}
 
-        {!spot && rootTab === "guides" && !openGuide ? (
+        {!searching && !spot && rootTab === "guides" && !openGuide ? (
           <section className="screen">
             <h1 className="screen-title">指南</h1>
             <div className="sheet">
@@ -698,7 +858,7 @@ function Book({
           </section>
         ) : null}
 
-        {!spot && openGuide && topicAt === null ? (
+        {!searching && !spot && openGuide && topicAt === null ? (
           <section className="screen">
             {guideParsed?.lead ? <div className="reading lede-block" dangerouslySetInnerHTML={{ __html: guideParsed.lead }} /> : null}
             <div className="sheet">
@@ -722,11 +882,11 @@ function Book({
           </section>
         ) : null}
 
-        {!spot && topic ? (
+        {!searching && !spot && topic ? (
           <article className="screen reading" dangerouslySetInnerHTML={{ __html: topicHtml || topic.html }} />
         ) : null}
 
-        {trip.footer && !spot && topicAt === null ? <p className="foot">{trip.footer}</p> : null}
+        {trip.footer && !searching && !spot && topicAt === null ? <p className="foot">{trip.footer}</p> : null}
       </main>
       <nav className="dock" aria-label="主要畫面">
         {[
