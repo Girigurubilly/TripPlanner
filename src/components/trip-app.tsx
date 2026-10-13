@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent, type ReactNode } from "react";
 import {
   BookOpen,
   CalendarDays,
@@ -22,6 +22,7 @@ import {
   cleanCredit,
   dayKey,
   dayMenu,
+  daySouvenirs,
   diningForSpot,
   sunLine,
   tidyRoot,
@@ -1570,7 +1571,8 @@ function DayScreen({
           </div>
         </>
       ) : null}
-      <DayMeals trip={trip} day={day} />
+      <DayMeals key={day.id} trip={trip} day={day} />
+      <DaySouvenirs key={day.id} trip={trip} day={day} />
       {day.noteHtml ? (
         <div className="reading day-link">
           <Html html={day.noteHtml} />
@@ -1666,13 +1668,27 @@ function dayHeadline(day: TripDay): { when: string; objective: string } {
   return { when: day.label, objective: title };
 }
 
+function FoldBox({ title, children }: { title: string; children: ReactNode }) {
+  // Collapsed by default; the header is the tap target. Callers pass
+  // key={day.id} so switching days starts collapsed again.
+  const [open, setOpen] = useState(false);
+  return (
+    <section className="meals">
+      <button type="button" className="section-label fold-head" aria-expanded={open} onClick={() => setOpen(!open)}>
+        <span>{title}</span>
+        <span aria-hidden="true">{open ? "▾" : "▸"}</span>
+      </button>
+      {open ? children : null}
+    </section>
+  );
+}
+
 function DayMeals({ trip, day }: { trip: TripBook; day: TripDay }) {
   const guide = trip.guides.find((item) => item.id === "food" || /美食/.test(item.label));
   const menu = useMemo(() => dayMenu(day, guide), [day, guide]);
   if (!menu.length) return null;
   return (
-    <section className="meals">
-      <h2 className="section-label">今日美食</h2>
+    <FoldBox title="今日美食">
       {menu.map((meal, index) => (
         <article className="meal" key={`${meal.slot}-${meal.title}-${index}`}>
           <h3>
@@ -1704,7 +1720,41 @@ function DayMeals({ trip, day }: { trip: TripBook; day: TripDay }) {
           ))}
         </article>
       ))}
-    </section>
+    </FoldBox>
+  );
+}
+
+function DaySouvenirs({ trip, day }: { trip: TripBook; day: TripDay }) {
+  const guide = trip.guides.find((item) => item.id === "souvenir" || /手信/.test(item.label));
+  const found = useMemo(() => daySouvenirs(day, guide), [day, guide]);
+  if (!found.items.length) return null;
+  return (
+    <FoldBox title="今日手信">
+      {found.items.map((item) => (
+        <article className="meal" key={item.name}>
+          <h3>{item.name}</h3>
+          {item.detail ? (
+            <ul>
+              <li>{item.detail}</li>
+            </ul>
+          ) : null}
+          {item.links.length ? (
+            <p className="restlinks">
+              {item.links.map((link) => (
+                <a key={link.href} href={link.href} target="_blank" rel="noopener">
+                  {link.label}
+                </a>
+              ))}
+            </p>
+          ) : null}
+        </article>
+      ))}
+      {found.notes.map((note) => (
+        <p className="tiny" key={note}>
+          {note}
+        </p>
+      ))}
+    </FoldBox>
   );
 }
 
