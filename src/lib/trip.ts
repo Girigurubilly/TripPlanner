@@ -825,6 +825,10 @@ export function diningForSpot(spot: TripSpot, day: TripDay, guide?: TripGuide): 
 
 function matchDining(spot: TripSpot, catalog: FoodPlace[], allowTokens: boolean): FoodPlace[] {
   const blob = normName(`${spot.name} ${spot.html.replace(/<[^>]+>/g, " ")}`);
+  // CJK names carry full meaning in 2–3 chars (道頓堀); don't apply the
+  // Latin-oriented length bars to them.
+  const longEnough = (value: string, bar: number) =>
+    value.length >= bar || (value.length >= 3 && /[\u4e00-\u9fff]/.test(value));
   const found: FoodPlace[] = [];
   for (const place of catalog) {
     const name = normName(place.name);
@@ -832,9 +836,9 @@ function matchDining(spot: TripSpot, catalog: FoodPlace[], allowTokens: boolean)
       ? place.name
           .split(/\s+/)
           .map((part) => normName(part))
-          .filter((part) => part.length >= 5 && !["coffee", "caffe", "hotel", "galleria"].includes(part))
+          .filter((part) => longEnough(part, 5) && !["coffee", "caffe", "hotel", "galleria"].includes(part))
       : [];
-    const hit = (name.length >= 4 && blob.includes(name)) || tokens.some((token) => blob.includes(token));
+    const hit = (longEnough(name, 4) && blob.includes(name)) || tokens.some((token) => blob.includes(token));
     if (!hit) continue;
     if (!found.some((item) => item.name === place.name && item.address === place.address)) found.push(place);
   }
