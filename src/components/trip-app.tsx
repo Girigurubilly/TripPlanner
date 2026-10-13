@@ -50,7 +50,7 @@ import {
 import { DrivePanel } from "@/components/drive-panel";
 import { syncTripDriveIfDue } from "@/lib/drive-sync";
 import { AI_TRIP_PROMPT } from "@/lib/ai-prompt";
-import { currentPlace, type PlaceFix } from "@/lib/geo";
+import { startLocate, type PlaceFix } from "@/lib/geo";
 
 const TAB_ICON: Record<string, LucideIcon> = {
   overview: BookOpen,
@@ -1637,6 +1637,11 @@ function ExtraStops({ tripId, dayId }: { tripId: string; dayId: string }) {
   const [fixing, setFixing] = useState(false);
   const [error, setError] = useState("");
   const [draft, setDraft] = useState<PlaceFix | null>(null);
+  const stopLocate = useRef<(() => void) | null>(null);
+
+  useEffect(() => {
+    return () => stopLocate.current?.();
+  }, []);
 
   useEffect(() => {
     const load = () => setRows(loadExtras(tripId).filter((stop) => stop.dayId === dayId));
@@ -1645,17 +1650,25 @@ function ExtraStops({ tripId, dayId }: { tripId: string; dayId: string }) {
     return () => window.removeEventListener("trip-extras", load);
   }, [tripId, dayId]);
 
-  async function locate() {
-    setFixing(true);
+  function locate() {
+    stopLocate.current?.();
+    let answered = false;
+    stopLocate.current = startLocate(
+      (place) => {
+        answered = true;
+        setFixing(false);
+        setDraft(place);
+      },
+      (message) => {
+        answered = true;
+        setFixing(false);
+        setError(message);
+      },
+    );
+    if (answered) return;
     setError("");
     setDraft(null);
-    try {
-      setDraft(await currentPlace());
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "而家定位唔到");
-    } finally {
-      setFixing(false);
-    }
+    setFixing(true);
   }
 
   function confirm() {
@@ -1731,8 +1744,8 @@ function ExtraStops({ tripId, dayId }: { tripId: string; dayId: string }) {
           </div>
         </form>
       ) : (
-        <button className="btn here-go" type="button" disabled={fixing} onClick={() => void locate()}>
-          {fixing ? "正在定位…" : "打卡新地方"}
+        <button className="btn here-go" type="button" disabled={fixing} onClick={locate}>
+          {fixing ? "正在問定位…" : "打卡新地方"}
         </button>
       )}
       {error ? <p className="status error">{error}</p> : null}
