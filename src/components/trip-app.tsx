@@ -21,6 +21,7 @@ import {
   cityLabel,
   cleanCredit,
   dayKey,
+  dayMenu,
   diningForSpot,
   sunLine,
   tidyRoot,
@@ -1534,6 +1535,11 @@ function DayScreen({
                   <span className="navrow-main">
                     <strong>{spotItem.name}</strong>
                     {spotItem.badge ? <em>{spotItem.badge}</em> : null}
+                    {spotItem.address || spotItem.price ? (
+                      <small className="tiny">
+                        {[spotItem.address, spotItem.price].filter(Boolean).join(" · ")}
+                      </small>
+                    ) : null}
                     {at ? <span className="pill-hint">{visitClock(at)} 已去</span> : null}
                   </span>
                   <button
@@ -1554,6 +1560,7 @@ function DayScreen({
           </div>
         </>
       ) : null}
+      <DayMeals trip={trip} day={day} />
       {day.noteHtml ? (
         <div className="reading day-link">
           <Html html={day.noteHtml} />
@@ -1590,18 +1597,22 @@ function DayScreen({
 
 function planItems(day: TripDay): Array<{ kind: "ride"; ride: Ride } | { kind: "spot"; index: number }> {
   const items: Array<{ kind: "ride"; ride: Ride } | { kind: "spot"; index: number }> = [];
-  let cursor = 0;
+  const placed = new Set<number>();
   for (const ride of day.rides) {
     items.push({ kind: "ride", ride });
-    if (ride.spot && day.spots[cursor]?.name === ride.spot) {
-      items.push({ kind: "spot", index: cursor });
-      cursor += 1;
+    if (ride.spot) {
+      const index = day.spots.findIndex(
+        (spot, spotIndex) => !placed.has(spotIndex) && spot.name === ride.spot,
+      );
+      if (index >= 0) {
+        placed.add(index);
+        items.push({ kind: "spot", index });
+      }
     }
   }
-  while (cursor < day.spots.length) {
-    items.push({ kind: "spot", index: cursor });
-    cursor += 1;
-  }
+  day.spots.forEach((_, index) => {
+    if (!placed.has(index)) items.push({ kind: "spot", index });
+  });
   return items;
 }
 
@@ -1623,6 +1634,48 @@ function dayHeadline(day: TripDay): { when: string; objective: string } {
   const cut = title.split(/：|:/);
   if (cut.length > 1 && cut[0].length <= 24) return { when: cut[0].trim(), objective: cut.slice(1).join("：").trim() };
   return { when: day.label, objective: title };
+}
+
+function DayMeals({ trip, day }: { trip: TripBook; day: TripDay }) {
+  const guide = trip.guides.find((item) => item.id === "food" || /美食/.test(item.label));
+  const menu = useMemo(() => dayMenu(day, guide), [day, guide]);
+  if (!menu.length) return null;
+  return (
+    <section className="meals">
+      <h2 className="section-label">今日美食</h2>
+      {menu.map((meal, index) => (
+        <article className="meal" key={`${meal.slot}-${meal.title}-${index}`}>
+          <h3>
+            {meal.slot ? `${meal.slot} · ` : ""}
+            {meal.title}
+          </h3>
+          {meal.note ? <p className="tiny">{meal.note}</p> : null}
+          {meal.places.map((place) => (
+            <div className="meal-place" key={`${place.name}-${place.address}`}>
+              <h4>{place.name}</h4>
+              {place.address ? <p className="tiny">{place.address}</p> : null}
+              {place.lines.length ? (
+                <ul>
+                  {place.lines.map((line) => (
+                    <li key={line}>{line}</li>
+                  ))}
+                </ul>
+              ) : null}
+              {place.links.length ? (
+                <p className="restlinks">
+                  {place.links.map((link) => (
+                    <a key={link.href} href={link.href} target="_blank" rel="noopener">
+                      {link.label}
+                    </a>
+                  ))}
+                </p>
+              ) : null}
+            </div>
+          ))}
+        </article>
+      ))}
+    </section>
+  );
 }
 
 function SpotDining({ day, spot, guide }: { day: TripDay; spot: TripSpot; guide?: TripGuide }) {
