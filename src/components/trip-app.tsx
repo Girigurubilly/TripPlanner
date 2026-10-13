@@ -866,7 +866,7 @@ function Book({
           />
         ) : null}
 
-        {!searching && !spot && rootTab === "transport" ? <Transport trip={trip} /> : null}
+        {!searching && !spot && rootTab === "transport" ? <Transport trip={trip} dayId={activeDay?.id || ""} onDay={onDay} /> : null}
 
         {!searching && !spot && rootTab === "eat" && openEat ? (
           <section className="screen">
@@ -1899,12 +1899,18 @@ function CheckIn({ at, onToggle }: { at: string; onToggle: () => void }) {
   );
 }
 
-function Transport({ trip }: { trip: TripBook }) {
+function Transport({ trip, dayId, onDay }: { trip: TripBook; dayId: string; onDay: (id: string) => void }) {
   const days = trip.days.filter((day) => day.rides.length);
-  const [picked, setPicked] = useState(days[0]?.id || "");
-  const day = days.find((item) => item.id === picked) || days[0];
+  const day = trip.days.find((item) => item.id === dayId) || days[0];
+  const chipRef = useRef<HTMLDivElement>(null);
   const covered = new Set(days.map((item) => item.label.replace(/\s+/g, "").slice(0, 6)));
   const leftover = trip.transport.blocks.filter((block) => !covered.has(block.heading.replace(/\s+/g, "").slice(0, 6)) && !days.some((item) => block.heading.replace(/\s+/g, "").includes(item.label.replace(/\s+/g, "").slice(0, 6))));
+  useEffect(() => {
+    const strip = chipRef.current?.parentElement;
+    const chip = chipRef.current;
+    if (!strip || !chip) return;
+    strip.scrollTo({ left: chip.offsetLeft - strip.clientWidth / 2 + chip.clientWidth / 2 });
+  }, [day?.id]);
   return (
     <section className="screen">
       {days.length ? (
@@ -1913,7 +1919,12 @@ function Transport({ trip }: { trip: TripBook }) {
             const chip = dayChip(item);
             const on = item.id === day?.id;
             return (
-              <div key={item.id} className={on ? "daychip on" : "daychip"} onClick={() => setPicked(item.id)}>
+              <div
+                key={item.id}
+                ref={on ? chipRef : undefined}
+                className={on ? "daychip on" : "daychip"}
+                onClick={() => onDay(item.id)}
+              >
                 <b>{chip.num}</b>
                 {chip.hint ? <small>{chip.hint}</small> : null}
               </div>
@@ -1925,11 +1936,15 @@ function Transport({ trip }: { trip: TripBook }) {
       {day ? (
         <article id={`leg-${day.id}`}>
           <h2 className="section-label">{day.label}</h2>
-          <div className="sheet plan">
-            {day.rides.map((ride) => (
-              <RideCard key={`${day.id}-${ride.from}-${ride.to}-${ride.detail}`} ride={ride} />
-            ))}
-          </div>
+          {day.rides.length ? (
+            <div className="sheet plan">
+              {day.rides.map((ride) => (
+                <RideCard key={`${day.id}-${ride.from}-${ride.to}-${ride.detail}`} ride={ride} />
+              ))}
+            </div>
+          ) : (
+            <p className="muted">呢日未有路程。</p>
+          )}
         </article>
       ) : null}
       {leftover.map((block) => (
