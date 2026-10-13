@@ -20,6 +20,7 @@ import {
 import {
   cityLabel,
   cleanCredit,
+  dayMenu,
   sunLine,
   tidyRoot,
   absorbSaved,
@@ -49,6 +50,7 @@ import {
   type TripBook,
   type TripSpot,
   type TripDay,
+  type TripGuide,
 } from "@/lib/trip";
 import { DrivePanel } from "@/components/drive-panel";
 import { syncTripDriveIfDue } from "@/lib/drive-sync";
@@ -1492,7 +1494,7 @@ function DayScreen({
       <div className="reading" ref={readRef}>
         {day.leadHtml ? <Html html={day.leadHtml} /> : null}
         {day.walkHtml ? <Html html={day.walkHtml} /> : null}
-        {day.foodHtml ? <Html html={day.foodHtml} /> : null}
+        <DayMeals day={day} guide={trip.guides.find((item) => item.id === "food" || /美食/.test(item.label))} />
         {day.noteHtml ? <Html html={day.noteHtml} /> : null}
       </div>
       {day.spots.length ? (
@@ -1635,6 +1637,58 @@ function DayNav({
         <ChevronRight size={18} aria-hidden="true" />
       </button>
     </nav>
+  );
+}
+
+function DayMeals({ day, guide }: { day: TripDay; guide?: TripGuide }) {
+  const rows = useMemo(() => dayMenu(day, guide), [day, guide]);
+  if (!rows.length) return day.foodHtml ? <Html html={day.foodHtml} /> : null;
+  return (
+    <section className="meals">
+      <h2 className="section-label">本日美食</h2>
+      {rows.map((row) => (
+        <article className="meal" key={`${row.slot}-${row.title}`}>
+          {row.slot ? <p className="kicker">{row.slot}</p> : null}
+          {row.places.length ? (
+            <>
+              {row.note ? <p>{row.note}</p> : null}
+              {row.places.map((place) => (
+                <div className="meal-place" key={`${place.name}-${place.address}`}>
+                  <h3>{place.name}</h3>
+                  {place.address ? <p className="tiny">{place.address}</p> : null}
+                  {place.lines.length ? (
+                    <ul>
+                      {place.lines.map((line) => (
+                        <li key={line}>{line}</li>
+                      ))}
+                    </ul>
+                  ) : null}
+                  {place.links.length ? (
+                    <p className="restlinks">
+                      {place.links.map((link) => (
+                        <a key={link.href} href={link.href} target="_blank" rel="noopener">
+                          {link.label}
+                        </a>
+                      ))}
+                    </p>
+                  ) : null}
+                </div>
+              ))}
+            </>
+          ) : (
+            <>
+              <h3>{row.title}</h3>
+              {row.note ? <p>{row.note}</p> : null}
+            </>
+          )}
+        </article>
+      ))}
+      <p className="tiny">
+        <a href="#" data-goto="food">
+          去美食頁睇全部
+        </a>
+      </p>
+    </section>
   );
 }
 

@@ -32,6 +32,7 @@ export type TripDay = {
   foodHtml: string;
   noteHtml: string;
   sun: TripSun;
+  meals: { slot: string; place: string; note: string }[];
   images: TripImage[];
   spots: TripSpot[];
 };
@@ -46,10 +47,28 @@ export type TripRationale = {
   html: string;
 };
 
+export type FoodLink = { label: string; href: string };
+
+export type FoodPlace = {
+  name: string;
+  city: string;
+  address: string;
+  lines: string[];
+  links: FoodLink[];
+};
+
+export type DayMeal = {
+  slot: string;
+  title: string;
+  note: string;
+  places: FoodPlace[];
+};
+
 export type TripGuide = {
   id: string;
   label: string;
   html: string;
+  places: FoodPlace[];
 };
 
 export type TripBook = {
@@ -399,6 +418,253 @@ export function sunLine(day: TripDay): string {
   return [rise, set].filter(Boolean).join(" · ");
 }
 
+function parseMeals(value: unknown): { slot: string; place: string; note: string }[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    const row = (item || {}) as Record<string, unknown>;
+    const place = asString(row.place).trim();
+    const note = asString(row.note).trim();
+    if (!place && !note) return [];
+    return [{ slot: asString(row.slot).trim(), place, note }];
+  });
+}
+
+function parseFoodPlaces(value: unknown): FoodPlace[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    const row = (item || {}) as Record<string, unknown>;
+    const name = asString(row.name).trim();
+    if (!name) return [];
+    const links = Array.isArray(row.links)
+      ? row.links.flatMap((link) => {
+          const entry = (link || {}) as Record<string, unknown>;
+          const href = asString(entry.href).trim();
+          if (!/^https?:/i.test(href)) return [];
+          return [{ label: asString(entry.label).trim() || "連結", href }];
+        })
+      : [];
+    const lines = Array.isArray(row.lines) ? row.lines.map((line) => asString(line).trim()).filter(Boolean) : [];
+    return [{ name, city: asString(row.city).trim().toLowerCase(), address: asString(row.address).trim(), lines, links }];
+  });
+}
+
+function normName(value: string): string {
+  return value
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .replace(/&/g, "")
+    .replace(/[^a-z0-9\u3040-\u30ff\u4e00-\u9fff]/g, "");
+}
+
+function splitPlace(value: string): { name: string; address: string } {
+  const text = value.replace(/\s+/g, " ").trim();
+  const matched = text.match(/^(.{2,48}?)（(.+)）$/);
+  if (!matched) return { name: text, address: "" };
+  return { name: matched[1].trim(), address: matched[2].trim() };
+}
+
+function looksLikePlace(name: string): boolean {
+  const text = name.trim();
+  if (text.length < 2 || text.length > 48) return false;
+  if (/[。！？]/.test(text)) return false;
+  if (/^[€¥$0-9]/.test(text)) return false;
+  if (/^(必試|午餐|晚餐|早餐|下午茶|輕晚餐|早午餐|宵夜|備選|人均|已定|唔|企|坐)/.test(text)) return false;
+  if (/說明|文化|地圖|小費/.test(text)) return false;
+  return true;
+}
+
+function cityHint(text: string): string {
+  if (/米蘭|milan/i.test(text)) return "milan";
+  if (/佛羅倫斯|florence|firenze/i.test(text)) return "florence";
+  if (/馬德里|madrid/i.test(text)) return "madrid";
+  if (/大阪|osaka/i.test(text)) return "osaka";
+  if (/京都|kyoto/i.test(text)) return "kyoto";
+  if (/東京|tokyo/i.test(text)) return "tokyo";
+  return "";
+}
+
+function linksIn(root: ParentNode): FoodLink[] {
+  return [...root.querySelectorAll("a")]
+    .flatMap((link) => {
+      if (link.querySelector("img")) return [];
+      const href = link.getAttribute("href") || "";
+      if (!/^https?:/i.test(href)) return [];
+      const raw = (link.textContent || "").replace(/\s+/g, "");
+      const label = /地圖|map/i.test(raw) ? "地圖" : /評論|tripadvisor/i.test(raw) ? "評論" : /官|網站|web/i.test(raw) ? "官網" : raw.slice(0, 8) || "連結";
+      return [{ label, href }];
+    })
+    .filter((link, index, all) => all.findIndex((item) => item.href === link.href) === index)
+    .slice(0, 3);
+}
+
+function linesIn(root: ParentNode): string[] {
+  return [...root.querySelectorAll("li")]
+    .map((item) => (item.textContent || "").replace(/\s+/g, " ").trim())
+    .filter((line) => line && line.length < 180)
+    .slice(0, 6);
+}
+
+export function foodCatalog(html: string, seeded: FoodPlace[] = []): FoodPlace[] {
+  if (seeded.length) return seeded;
+  if (!html || typeof DOMParser === "undefined") return [];
+  const doc = new DOMParser().parseFromString(`<div id="food-root">${html}</div>`, "text/html");
+  const root = doc.getElementById("food-root");
+  if (!root) return [];
+  const places: FoodPlace[] = [];
+  let city = "";
+  const own = (el: Element) =>
+    [...el.childNodes]
+      .filter((node) => node.nodeType === Node.TEXT_NODE)
+      .map((node) => node.textContent || "")
+      .join("")
+      .replace(/\s+/g, " ")
+      .trim();
+
+  const push = (name: string, address: string, lines: string[], links: FoodLink[]) => {
+    if (!looksLikePlace(name)) return;
+    if (places.some((place) => place.name === name && place.address === address)) return;
+    places.push({ name, city, address, lines: lines.filter((line) => !line.startsWith(name)), links });
+  };
+
+  for (const el of [...root.querySelectorAll("h2, h3, h4, p, li")]) {
+    if (el.tagName === "H2" || el.tagName === "H3") {
+      const found = cityHint(el.textContent || "");
+      if (found) city = found;
+      continue;
+    }
+    if (el.tagName === "H4") {
+      const split = splitPlace(own(el) || (el.textContent || ""));
+      if (!looksLikePlace(split.name) || !split.address) continue;
+      const lines: string[] = [];
+      const links: FoodLink[] = [];
+      let sib = el.nextElementSibling;
+      while (sib && !["H2", "H3", "H4"].includes(sib.tagName)) {
+        if (sib.classList.contains("restextra")) links.push(...linksIn(sib));
+        else if (sib.tagName === "P") {
+          const text = (sib.textContent || "").replace(/\s+/g, " ").trim();
+          if (text) lines.push(text);
+        } else if (sib.tagName === "UL" || sib.tagName === "OL") lines.push(...linesIn(sib));
+        sib = sib.nextElementSibling;
+      }
+      push(split.name, split.address, lines, links);
+      continue;
+    }
+    const strong = el.querySelector(":scope > strong");
+    const lead = [...el.childNodes].find((node) => node.nodeType !== Node.TEXT_NODE || (node.textContent || "").trim());
+    if (!strong || lead !== strong) continue;
+    const split = splitPlace((strong.textContent || "").replace(/\s+/g, " ").trim());
+    const after = own(el);
+    const paren = (after.match(/（([^）]+)）/) || [])[1] || "";
+    const rawAddress = split.address || paren;
+    const address = /^(day|dec|\d|早餐|午餐|晚餐|下午茶)/i.test(rawAddress) ? "" : rawAddress;
+    if (!looksLikePlace(split.name)) continue;
+    const lines: string[] = [];
+    const links: FoodLink[] = [];
+    if (el.tagName === "LI") {
+      const text = (el.textContent || "").replace(/\s+/g, " ").trim();
+      const rest = text.replace(split.name, "").replace(/^（[^）]*）/, "").replace(/^[：:\-—\s]+/, "").trim();
+      if (rest) lines.push(rest);
+      const extra = el.nextElementSibling;
+      if (extra?.classList.contains("restextra")) links.push(...linksIn(extra));
+      links.push(...linksIn(el));
+    } else {
+      let sib = el.nextElementSibling;
+      while (sib && !["H2", "H3", "H4"].includes(sib.tagName) && !(sib.tagName === "P" && sib.querySelector(":scope > strong"))) {
+        if (sib.classList.contains("restextra")) links.push(...linksIn(sib));
+        else if (sib.tagName === "UL" || sib.tagName === "OL") lines.push(...linesIn(sib));
+        else if (sib.tagName === "P") {
+          const text = (sib.textContent || "").replace(/\s+/g, " ").trim();
+          if (text) lines.push(text);
+        }
+        sib = sib.nextElementSibling;
+      }
+    }
+    push(split.name, address, lines, links);
+  }
+  return places;
+}
+
+function mealSlot(title: string, note: string): string {
+  const matched = title.match(/^(輕晚餐|下午茶|早午餐|早餐|午餐|晚餐|宵夜)/);
+  if (matched) return matched[1];
+  const blob = `${title} ${note}`;
+  return (["輕晚餐", "下午茶", "早午餐", "早餐", "午餐", "晚餐", "宵夜"].find((slot) => blob.includes(slot)) || "");
+}
+
+function candidates(title: string, note: string): string[] {
+  const head = splitPlace(title).name.trim();
+  const parts = `${title} ${note}`.split(/[／/、,，]/).map((part) => splitPlace(part).name.trim());
+  return [...new Set([head, ...parts])].filter(looksLikePlace);
+}
+
+function pickPlace(query: string, places: FoodPlace[], city: string): FoodPlace | null {
+  const wanted = normName(splitPlace(query).name);
+  const tokens = [...new Set(query.split(/[\s／/、,，嘅的]/).map((part) => normName(splitPlace(part).name)).filter((part) => part.length >= 4))];
+  const ranked = places
+    .map((place) => {
+      const name = normName(place.name);
+      let score = 0;
+      if (wanted.length >= 3 && (name === wanted || name.includes(wanted) || wanted.includes(name))) score = 100 - Math.abs(name.length - wanted.length);
+      else {
+        const hit = tokens.filter((token) => name.includes(token)).sort((a, b) => b.length - a.length)[0];
+        if (hit && hit.length >= name.length * 0.45) score = hit.length;
+      }
+      return { place, score };
+    })
+    .filter((item) => item.score > 0);
+  const local = ranked.filter((item) => !item.place.city || item.place.city === city);
+  const pool = city && local.length ? local : ranked;
+  pool.sort((a, b) => b.score - a.score);
+  return pool[0]?.place || null;
+}
+
+export function dayMenu(day: TripDay, guide?: TripGuide): DayMeal[] {
+  const catalog = foodCatalog(guide?.html || "", guide?.places || []);
+  const city = day.city.trim().toLowerCase();
+  const rows = day.meals.length
+    ? day.meals.map((meal) => ({ slot: meal.slot, title: meal.place || meal.note, note: meal.note, queries: [meal.place].filter(Boolean) }))
+    : dishesFromHtml(day.foodHtml);
+  return rows
+    .map((row) => {
+      const places: FoodPlace[] = [];
+      for (const query of row.queries) {
+        const place = pickPlace(query, catalog, city);
+        if (place && !places.some((item) => item.name === place.name && item.address === place.address)) places.push(place);
+      }
+      for (const place of catalog) {
+        if (places.length >= 3) break;
+        if (city && place.city && place.city !== city) continue;
+        const blob = normName(`${row.title} ${row.note}`);
+        const name = normName(place.name);
+        const tokens = place.name
+          .split(/\s+/)
+          .map((part) => normName(part))
+          .filter((part) => part.length >= 5 && !["coffee", "caffe", "hotel"].includes(part));
+        const hit = (name.length >= 4 && blob.includes(name)) || tokens.some((token) => blob.includes(token));
+        if (!hit) continue;
+        if (!places.some((item) => item.name === place.name && item.address === place.address)) places.push(place);
+      }
+      return { slot: row.slot, title: row.title, note: row.note, places };
+    })
+    .filter((row) => row.title || row.note || row.places.length);
+}
+
+function dishesFromHtml(html: string): { slot: string; title: string; note: string; queries: string[] }[] {
+  if (!html || typeof DOMParser === "undefined") return [];
+  const doc = new DOMParser().parseFromString(`<div id="dish">${html}</div>`, "text/html");
+  const root = doc.getElementById("dish");
+  if (!root) return [];
+  return [...root.querySelectorAll("li")].flatMap((item) => {
+    const strong = item.querySelector("strong");
+    const title = (strong?.textContent || "").replace(/\s+/g, " ").trim();
+    const whole = (item.textContent || "").replace(/\s+/g, " ").trim();
+    const note = whole.replace(title, "").replace(/^[（(][^）)]*[）)]/, "").replace(/^[：:\-—\s]+/, "").trim();
+    if (!title && !note) return [];
+    return [{ slot: mealSlot(title, note), title: title || note, note, queries: candidates(title, note) }];
+  });
+}
+
 function parseDay(value: unknown, index: number): TripDay {
   if (!value || typeof value !== "object") throw new Error(`第 ${index + 1} 日格式不正確`);
   const day = value as Record<string, unknown>;
@@ -415,6 +681,7 @@ function parseDay(value: unknown, index: number): TripDay {
     foodHtml: sanitizeHtml(asString(day.foodHtml)),
     noteHtml: sanitizeHtml(asString(day.noteHtml)),
     sun: parseSun(day),
+    meals: parseMeals(day.meals),
     images: imagesRaw.map((image) => {
       const item = (image || {}) as Record<string, unknown>;
       return {
@@ -521,6 +788,7 @@ export function parseTripBook(value: unknown): TripBook {
           id: asString(guide.id).trim(),
           label: asString(guide.label).trim(),
           html: sanitizeHtml(asString(guide.html)),
+          places: parseFoodPlaces(guide.places),
         };
       })
       .filter((guide) => guide.id && guide.label),
