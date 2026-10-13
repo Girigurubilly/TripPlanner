@@ -1571,8 +1571,14 @@ function DayScreen({
           </div>
         </>
       ) : null}
-      <DayMeals key={day.id} trip={trip} day={day} />
-      <DaySouvenirs key={day.id} trip={trip} day={day} />
+      {/*
+        Keys must differ between these two siblings. Giving both the same
+        key={day.id} made React drop the first from its reconciliation map,
+        so the old 今日美食 section was never unmounted and a new one
+        stacked up on every date switch.
+      */}
+      <DayMeals key={`meals-${day.id}`} trip={trip} day={day} />
+      <DaySouvenirs key={`souv-${day.id}`} trip={trip} day={day} />
       {day.noteHtml ? (
         <div className="reading day-link">
           <Html html={day.noteHtml} />
