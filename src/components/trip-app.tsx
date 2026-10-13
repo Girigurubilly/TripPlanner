@@ -1525,7 +1525,17 @@ function DayScreen({
           </h2>
           <div className="sheet plan">
             {route.map((item) => {
-              if (item.kind === "ride") return <RideCard key={`${item.ride.from}-${item.ride.to}-${item.ride.detail}`} ride={item.ride} />;
+              if (item.kind === "ride")
+                return (
+                  <RideCard
+                    key={`${item.ride.from}-${item.ride.to}-${item.ride.detail}`}
+                    ride={item.ride}
+                    onOpenSpot={(name) => {
+                      const index = day.spots.findIndex((spot) => spot.name === name);
+                      if (index >= 0) onSpot(index);
+                    }}
+                  />
+                );
               const spotIndex = item.index;
               const spotItem = day.spots[spotIndex];
               const at = visits[visitKey(day.id, spotIndex)] || "";
@@ -1616,12 +1626,32 @@ function planItems(day: TripDay): Array<{ kind: "ride"; ride: Ride } | { kind: "
   return items;
 }
 
-function RideCard({ ride }: { ride: Ride }) {
+function RideCard({ ride, onOpenSpot }: { ride: Ride; onOpenSpot?: (spotName: string) => void }) {
   const line = [ride.mode, ride.detail, ride.price].filter(Boolean).join(" · ");
+  // A ride that leads to a spot opens that spot's detail, so the destination
+  // is tappable from the timeline itself.
+  const openable = Boolean(ride.spot && onOpenSpot);
   return (
-    <div className="ride">
+    <div
+      className="ride"
+      role={openable ? "button" : undefined}
+      tabIndex={openable ? 0 : undefined}
+      style={openable ? { cursor: "pointer" } : undefined}
+      onClick={openable ? () => onOpenSpot?.(ride.spot) : undefined}
+      onKeyDown={
+        openable
+          ? (event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                onOpenSpot?.(ride.spot);
+              }
+            }
+          : undefined
+      }
+    >
       <strong>
         {ride.from} → {ride.to}
+        {openable ? " ›" : ""}
       </strong>
       {line ? <p>{line}</p> : null}
       {ride.note ? <p className="tiny">{ride.note}</p> : null}
