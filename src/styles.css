@@ -1027,6 +1027,15 @@ figure.refimg img {
 .meals {
   margin: 8px 0 16px;
 }
+.fold-head {
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
 .meal {
   background: #fff;
   border: 1px solid var(--line);
