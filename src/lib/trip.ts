@@ -33,6 +33,7 @@ export type TripDay = {
   noteHtml: string;
   sun: TripSun;
   meals: { slot: string; place: string; note: string }[];
+  rides: Ride[];
   images: TripImage[];
   spots: TripSpot[];
 };
@@ -55,6 +56,16 @@ export type FoodPlace = {
   address: string;
   lines: string[];
   links: FoodLink[];
+};
+
+export type Ride = {
+  from: string;
+  to: string;
+  mode: string;
+  detail: string;
+  price: string;
+  note: string;
+  spot: string;
 };
 
 export type DayMeal = {
@@ -650,8 +661,6 @@ export function dayMenu(day: TripDay, guide?: TripGuide): DayMeal[] {
     .filter((row) => row.title || row.note || row.places.length);
 }
 
-export type TravelLeg = { from: string; to: string; how: string };
-
 const PLACE_GENERIC = new Set([
   "museo",
   "pinacoteca",
@@ -680,10 +689,32 @@ const PLACE_GENERIC = new Set([
 ]);
 
 function nameBits(value: string): string[] {
-  const plain = value.replace(/（[^）]*）/g, " ").replace(/[（）]/g, " ");
-  return [...new Set(plain.split(/[\s→＋+／/、,，·・\-—:：&]+/).map((part) => normName(part)))].filter(
-    (bit) => bit.length >= 4 && !PLACE_GENERIC.has(bit),
-  );
+  const plain = value.replace(/[（）()]/g, " ");
+  return [...new Set(plain.split(/[\s→＋+／/、,，·・\-—:：&]+/).map((part) => normName(part)))].filter((bit) => {
+    if (!bit || PLACE_GENERIC.has(bit)) return false;
+    if (/[\u4e00-\u9fff]/.test(bit)) return bit.length >= 2;
+    return bit.length >= 4;
+  });
+}
+
+function overlaps(bit: string, other: string): boolean {
+  if (bit === other) return true;
+  const min = /[\u4e00-\u9fff]/.test(`${bit}${other}`) ? 2 : 5;
+  return bit.length >= min && other.length >= min && (bit.includes(other) || other.includes(bit));
+}
+
+function sharedBits(a: string, b: string): string[] {
+  const right = nameBits(b);
+  return nameBits(a).filter((bit) => right.some((other) => overlaps(bit, other)));
+}
+
+function landingSpot(to: string, spots: TripSpot[]): string {
+  const ranked = spots
+    .map((spot) => ({ name: spot.name, score: sharedBits(to, spot.name).reduce((sum, bit) => sum + bit.length, 0) }))
+    .filter((item) => item.score > 0)
+    .sort((a, b) => b.score - a.score);
+  if (!ranked.length || ranked.length > 1 && ranked[0].score === ranked[1].score) return "";
+  return ranked[0].name;
 }
 
 function samePlace(a: string, b: string): boolean {
@@ -695,13 +726,40 @@ function samePlace(a: string, b: string): boolean {
   );
 }
 
-function shortHow(value: string): string {
-  const cut = value.split(/🕐|✅|⚠️/)[0].replace(/\s+/g, " ").trim();
-  if (!cut) return "";
-  return cut.length > 72 ? `${cut.slice(0, 70)}…` : cut;
+function parseRides(value: unknown): Ride[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    const row = (item || {}) as Record<string, unknown>;
+    const from = asString(row.from).trim();
+    const to = asString(row.to).trim();
+    if (!from || !to) return [];
+    return [
+      {
+        from,
+        to,
+        mode: asString(row.mode).trim(),
+        detail: asString(row.detail).trim(),
+        price: asString(row.price).trim(),
+        note: asString(row.note).trim(),
+        spot: asString(row.spot).trim(),
+      },
+    ];
+  });
 }
 
-export function travelLegs(html: string): TravelLeg[] {
+function rideMode(text: string): string {
+  const start = text.split(/—|或/)[0].trim().slice(0, 16);
+  if (/飛機|航班/.test(start)) return "飛機";
+  if (/火車|特快|高鐵/.test(start)) return "火車";
+  if (/巴士|公車|電車|有軌/.test(start)) return "巴士";
+  if (/的士|計程車|taxi/i.test(start)) return "的士";
+  if (/地鐵|捷運/.test(start)) return "地鐵";
+  if (/船|渡輪/.test(start)) return "船";
+  if (/步行|行路|🚶/.test(start)) return "步行";
+  return "";
+}
+
+function ridesFromHtml(html: string, spots: TripSpot[]): Ride[] {
   if (!html || typeof DOMParser === "undefined") return [];
   const doc = new DOMParser().parseFromString(`<div id="legs">${html}</div>`, "text/html");
   const root = doc.getElementById("legs");
@@ -711,44 +769,42 @@ export function travelLegs(html: string): TravelLeg[] {
     const title = (strong?.textContent || "").replace(/\s+/g, " ").trim();
     const ends = title.split(/\s*→\s*/).map((part) => part.trim()).filter(Boolean);
     if (ends.length < 2) return [];
-    const how = shortHow((item.textContent || "").replace(title, ""));
-    return [{ from: ends[0], to: ends[ends.length - 1], how }];
+    const rest = (item.textContent || "").replace(title, "").replace(/\s+/g, " ").trim();
+    const [lead, ...more] = rest.split(/🕐|✅|⚠️/);
+    const mode = rideMode(lead || "");
+    const detail = (lead || "").replace(/^\p{Extended_Pictographic}\uFE0F?\s*/u, "").replace(new RegExp(`^${mode}`), "").trim();
+    const landed = landingSpot(ends[ends.length - 1], spots);
+    return [
+      {
+        from: ends[0],
+        to: ends[ends.length - 1],
+        mode,
+        detail,
+        price: "",
+        note: more.join(" ").replace(/\s+/g, " ").trim(),
+        spot: landed,
+      },
+    ];
   });
 }
 
-function hopPhrase(path: TravelLeg[]): string {
-  const how = path[path.length - 1]?.how || "";
-  if (!how) return "";
-  if (path.length === 1) return how;
-  const via = path.slice(0, -1).map((leg) => leg.to).filter(Boolean);
-  return via.length ? `經 ${via.join("、")} · ${how}` : how;
-}
-
-function hopBetween(fromName: string, toName: string, legs: TravelLeg[]): string {
-  const start = legs.findIndex((leg) => samePlace(leg.from, fromName));
-  if (start < 0) return "";
-  const path: TravelLeg[] = [];
-  for (let index = start; index < Math.min(legs.length, start + 4); index += 1) {
-    path.push(legs[index]);
-    if (samePlace(legs[index].to, toName)) return hopPhrase(path);
-  }
-  return "";
-}
-
-export function dayRoute(
-  day: TripDay,
-  blocks: { heading: string; html: string }[],
-): { arrive: string; hops: string[] } {
-  const key = day.label.replace(/\s+/g, "").slice(0, 6);
-  const block = blocks.find((item) => item.heading.replace(/\s+/g, "").includes(key));
-  const legs = block ? travelLegs(block.html) : [];
-  const hops = day.spots.slice(0, -1).map((spot, index) => hopBetween(spot.name, day.spots[index + 1].name, legs));
-  const first = day.spots[0];
-  const inbound = first
-    ? [...legs].reverse().find((leg) => samePlace(leg.to, first.name) && !day.spots.some((spot) => samePlace(leg.from, spot.name)))
-    : undefined;
-  const arrive = inbound ? `由 ${inbound.from} · ${inbound.how}` : "";
-  return { arrive, hops };
+function attachRides(days: TripDay[], blocks: { heading: string; html: string }[]): TripDay[] {
+  return days.map((day) => {
+    if (day.rides.length) {
+      return {
+        ...day,
+        rides: day.rides.map((ride) => {
+          if (!ride.spot) return ride;
+          if (day.spots.some((spot) => spot.name === ride.spot)) return ride;
+          const landed = day.spots.find((spot) => samePlace(ride.spot, spot.name));
+          return { ...ride, spot: landed?.name || "" };
+        }),
+      };
+    }
+    const key = day.label.replace(/\s+/g, "");
+    const block = blocks.find((item) => key && item.heading.replace(/\s+/g, "").includes(key.slice(0, 6)));
+    return { ...day, rides: block ? ridesFromHtml(block.html, day.spots) : [] };
+  });
 }
 
 export function dayKey(value: string): string {
@@ -806,6 +862,7 @@ function parseDay(value: unknown, index: number): TripDay {
     noteHtml: sanitizeHtml(asString(day.noteHtml)),
     sun: parseSun(day),
     meals: parseMeals(day.meals),
+    rides: parseRides(day.rides),
     images: imagesRaw.map((image) => {
       const item = (image || {}) as Record<string, unknown>;
       return {
@@ -918,6 +975,7 @@ export function parseTripBook(value: unknown): TripBook {
       .filter((guide) => guide.id && guide.label),
     footer: asString(raw.footer),
   };
+  trip.days = attachRides(trip.days, trip.transport.blocks);
   const hasBody =
     trip.overviewHtml ||
     trip.days.length > 0 ||

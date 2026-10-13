@@ -966,6 +966,21 @@ figure.refimg img {
 .day-link {
   margin: 8px 2px 0;
 }
+.plan .ride {
+  margin: 0;
+  padding: 10px 14px;
+  background: #f3faf8;
+  border-top: 1px solid var(--line);
+}
+.plan .ride strong {
+  display: block;
+  color: #1d6b5f;
+  font-size: 0.92rem;
+}
+.plan .ride p {
+  margin: 3px 0 0;
+  font-size: 0.86rem;
+}
 .plan .hop {
   margin: 0;
   padding: 8px 14px 8px 46px;

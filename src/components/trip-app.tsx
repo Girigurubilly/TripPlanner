@@ -21,7 +21,6 @@ import {
   cityLabel,
   cleanCredit,
   dayKey,
-  dayRoute,
   diningForSpot,
   sunLine,
   tidyRoot,
@@ -53,6 +52,7 @@ import {
   type TripSpot,
   type TripDay,
   type TripGuide,
+  type Ride,
 } from "@/lib/trip";
 import { DrivePanel } from "@/components/drive-panel";
 import { syncTripDriveIfDue } from "@/lib/drive-sync";
@@ -1459,7 +1459,7 @@ function DayScreen({
   const todayKey = dayKey(day.label) || dayKey(day.title);
   const todayPoint = rationale?.points.find((point) => dayKey(point.label) === todayKey);
   const otherPoints = rationale?.points.filter((point) => point !== todayPoint) || [];
-  const route = useMemo(() => dayRoute(day, trip.transport.blocks), [day, trip.transport.blocks]);
+  const route = planItems(day);
   const headline = dayHeadline(day);
   const [hero, ...moreImages] = day.images;
   const readRef = useRef<HTMLDivElement>(null);
@@ -1516,39 +1516,38 @@ function DayScreen({
       ) : (
         <div ref={readRef} />
       )}
-      {day.spots.length ? (
+      {day.spots.length || day.rides.length ? (
         <>
           <h2 className="section-label">
             今日行程
             <span className="muted">已去 {day.spots.filter((_, spotIndex) => visits[visitKey(day.id, spotIndex)]).length}／{day.spots.length}</span>
           </h2>
           <div className="sheet plan">
-            {route.arrive ? <p className="hop">{route.arrive}</p> : null}
-            {day.spots.map((item, spotIndex) => {
+            {route.map((item) => {
+              if (item.kind === "ride") return <RideCard key={`${item.ride.from}-${item.ride.to}-${item.ride.detail}`} ride={item.ride} />;
+              const spotIndex = item.index;
+              const spotItem = day.spots[spotIndex];
               const at = visits[visitKey(day.id, spotIndex)] || "";
               return (
-                <div key={`${item.name}-${spotIndex}`}>
-                  <div className="navrow spotrow" onClick={() => onSpot(spotIndex)}>
-                    <span className="navrow-num">{spotIndex + 1}</span>
-                    <span className="navrow-main">
-                      <strong>{item.name}</strong>
-                      {item.badge ? <em>{item.badge}</em> : null}
-                      {at ? <span className="pill-hint">{visitClock(at)} 已去</span> : null}
-                    </span>
-                    <button
-                      className={at ? "stamp on" : "stamp"}
-                      type="button"
-                      aria-label={at ? "取消打卡" : "打卡"}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        toggleVisit(trip.id, visitKey(day.id, spotIndex), at);
-                      }}
-                    >
-                      {at ? "已去" : "打卡"}
-                    </button>
-                    <span className="navrow-go" aria-hidden="true">›</span>
-                  </div>
-                  {route.hops[spotIndex] ? <p className="hop">{route.hops[spotIndex]}</p> : null}
+                <div className="navrow spotrow" key={`${spotItem.name}-${spotIndex}`} onClick={() => onSpot(spotIndex)}>
+                  <span className="navrow-num">{spotIndex + 1}</span>
+                  <span className="navrow-main">
+                    <strong>{spotItem.name}</strong>
+                    {spotItem.badge ? <em>{spotItem.badge}</em> : null}
+                    {at ? <span className="pill-hint">{visitClock(at)} 已去</span> : null}
+                  </span>
+                  <button
+                    className={at ? "stamp on" : "stamp"}
+                    type="button"
+                    aria-label={at ? "取消打卡" : "打卡"}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      toggleVisit(trip.id, visitKey(day.id, spotIndex), at);
+                    }}
+                  >
+                    {at ? "已去" : "打卡"}
+                  </button>
+                  <span className="navrow-go" aria-hidden="true">›</span>
                 </div>
               );
             })}
@@ -1586,6 +1585,36 @@ function DayScreen({
       ) : null}
       <DayNotes tripId={trip.id} dayId={day.id} />
     </section>
+  );
+}
+
+function planItems(day: TripDay): Array<{ kind: "ride"; ride: Ride } | { kind: "spot"; index: number }> {
+  const items: Array<{ kind: "ride"; ride: Ride } | { kind: "spot"; index: number }> = [];
+  let cursor = 0;
+  for (const ride of day.rides) {
+    items.push({ kind: "ride", ride });
+    if (ride.spot && day.spots[cursor]?.name === ride.spot) {
+      items.push({ kind: "spot", index: cursor });
+      cursor += 1;
+    }
+  }
+  while (cursor < day.spots.length) {
+    items.push({ kind: "spot", index: cursor });
+    cursor += 1;
+  }
+  return items;
+}
+
+function RideCard({ ride }: { ride: Ride }) {
+  const line = [ride.mode, ride.detail, ride.price].filter(Boolean).join(" · ");
+  return (
+    <div className="ride">
+      <strong>
+        {ride.from} → {ride.to}
+      </strong>
+      {line ? <p>{line}</p> : null}
+      {ride.note ? <p className="tiny">{ride.note}</p> : null}
+    </div>
   );
 }
 
@@ -1648,14 +1677,14 @@ function CheckIn({ at, onToggle }: { at: string; onToggle: () => void }) {
 }
 
 function Transport({ trip }: { trip: TripBook }) {
-  const jumps = trip.days.filter((day) =>
-    trip.transport.blocks.some((block) => block.heading.startsWith(day.label.slice(0, 6))),
-  );
+  const days = trip.days.filter((day) => day.rides.length);
+  const covered = new Set(days.map((day) => day.label.replace(/\s+/g, "").slice(0, 6)));
+  const leftover = trip.transport.blocks.filter((block) => !covered.has(block.heading.replace(/\s+/g, "").slice(0, 6)) && !days.some((day) => block.heading.replace(/\s+/g, "").includes(day.label.replace(/\s+/g, "").slice(0, 6))));
   return (
     <section className="screen">
-      {jumps.length ? (
+      {days.length ? (
         <div className="daystrip anchorstrip">
-          {jumps.map((day) => (
+          {days.map((day) => (
             <div
               key={day.id}
               className="daychip"
@@ -1667,14 +1696,21 @@ function Transport({ trip }: { trip: TripBook }) {
         </div>
       ) : null}
       {trip.transport.introHtml ? <div className="reading" dangerouslySetInnerHTML={{ __html: trip.transport.introHtml }} /> : null}
-      {trip.transport.blocks.map((block) => {
-        const match = jumps.find((day) => block.heading.startsWith(day.label.slice(0, 6)));
-        return (
-          <article className="reading block" id={match ? `leg-${match.id}` : undefined} key={block.heading}>
-            <div dangerouslySetInnerHTML={{ __html: block.html }} />
-          </article>
-        );
-      })}
+      {days.map((day) => (
+        <article className="reading block" id={`leg-${day.id}`} key={day.id}>
+          <h2>{day.label}</h2>
+          <div className="sheet plan">
+            {day.rides.map((ride) => (
+              <RideCard key={`${day.id}-${ride.from}-${ride.to}-${ride.detail}`} ride={ride} />
+            ))}
+          </div>
+        </article>
+      ))}
+      {leftover.map((block) => (
+        <article className="reading block" key={block.heading}>
+          <div dangerouslySetInnerHTML={{ __html: block.html }} />
+        </article>
+      ))}
     </section>
   );
 }
