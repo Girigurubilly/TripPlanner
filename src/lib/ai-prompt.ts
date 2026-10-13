@@ -49,6 +49,7 @@ export const AI_TRIP_PROMPT = [
   "- walkHtml: 景點之間怎麼走、大約幾分鐘。用 <ol> 或 <p>",
   "- foodHtml: 就近的早餐、午餐、晚餐或咖啡，寫步行距離。不要硬排太滿。",
   "- noteHtml: 預約、休館、最後入場、天氣、行李",
+  "- sun: 可選。{ sunrise, sunset, sunriseCity, sunsetCity }，時間用 24 小時，城市用英文小寫代號。畫面會顯示日出日落。",
   "- images: 沒有真實網址就用 []",
   "- spots: 當日停留點，順序就是行走順序。每個景點用下面欄位，不要把名稱再寫進 html：",
   "  - name: 景點或店名",

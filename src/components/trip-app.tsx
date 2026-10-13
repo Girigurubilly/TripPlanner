@@ -19,6 +19,9 @@ import {
 } from "lucide-react";
 import {
   cityLabel,
+  cleanCredit,
+  sunLine,
+  tidyRoot,
   absorbSaved,
   deleteTrip,
   downloadTrip,
@@ -1061,7 +1064,7 @@ function Overview({ html, tripId }: { html: string; tripId: string }) {
           title={section.title}
           html={section.html}
           tripId={tripId}
-          startOpen={/預訂|預約/.test(section.title)}
+          startOpen={/預訂|預約|預算/.test(section.title)}
         />
       ))}
     </>
@@ -1095,6 +1098,7 @@ function shownHtml(html: string): string {
     details.remove();
   }
   linkFoodMentions(root);
+  tidyRoot(root);
   return root.innerHTML;
 }
 
@@ -1345,6 +1349,7 @@ function presentSlice(html: string): string {
   const doc = new DOMParser().parseFromString(`<div id="slice">${html}</div>`, "text/html");
   const root = doc.getElementById("slice");
   if (!root) return html;
+  tidyRoot(root);
   while (root.children.length === 1 && root.firstElementChild?.classList.contains("card")) {
     const card = root.firstElementChild;
     while (card.firstChild) root.insertBefore(card.firstChild, card);
@@ -1471,6 +1476,7 @@ function DayScreen({
         {day.city ? ` · ${cityLabel(day.city)}` : ""}
       </p>
       <h1 className="screen-title">{day.title}</h1>
+      {sunLine(day) ? <p className="sunline">🌅 {sunLine(day)}</p> : null}
       {day.images.length ? (
         <div className="dayimgs">
           {day.images.map((image) => (
@@ -1478,7 +1484,7 @@ function DayScreen({
               <a href={image.href || image.src} target="_blank" rel="noopener">
                 <img src={image.src} alt={image.caption || day.title} loading="lazy" />
               </a>
-              {image.caption ? <div className="attr">{image.caption}</div> : null}
+              {image.caption ? <div className="attr">{cleanCredit(image.caption)}</div> : null}
             </figure>
           ))}
         </div>

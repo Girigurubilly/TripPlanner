@@ -15,6 +15,13 @@ export type TripSpot = {
   html: string;
 };
 
+export type TripSun = {
+  sunrise: string;
+  sunset: string;
+  sunriseCity: string;
+  sunsetCity: string;
+};
+
 export type TripDay = {
   id: string;
   city: string;
@@ -24,6 +31,7 @@ export type TripDay = {
   walkHtml: string;
   foodHtml: string;
   noteHtml: string;
+  sun: TripSun;
   images: TripImage[];
   spots: TripSpot[];
 };
@@ -89,6 +97,31 @@ export function cityLabel(city: string): string {
   const key = city.trim().toLowerCase();
   if (CITY_LABEL[key]) return CITY_LABEL[key];
   return city.trim();
+}
+
+export function cleanCredit(value: string): string {
+  const decoded = value
+    .replace(/&/g, "&")
+    .replace(/"/g, '"')
+    .replace(/&#x27;|&#39;/g, "'")
+    .replace(/</g, "<")
+    .replace(/>/g, ">");
+  const plain = decoded.replace(/<[^>]*>/g, " ").replace(/<[^<]*$/g, " ").replace(/\s+/g, " ").trim();
+  if (plain.length > 8 && !plain.includes("<")) return plain;
+  const license = decoded.match(/（[^（）<>]{2,80}）/);
+  return license ? `相片：${license[0]}` : plain.replace(/[<>]/g, "").trim();
+}
+
+export function tidyRoot(root: HTMLElement) {
+  for (const head of [...root.querySelectorAll("h1, h2, h3, h4")]) {
+    const parent = head.parentElement;
+    if (!parent) continue;
+    const media = [...head.children].filter((el) => el.matches("figure, img")).reverse();
+    for (const node of media) parent.insertBefore(node, head.nextSibling);
+  }
+  for (const credit of [...root.querySelectorAll(".attr")]) {
+    credit.textContent = cleanCredit(credit.textContent || "");
+  }
 }
 
 export function tripStats(trip: TripBook): string {
@@ -226,6 +259,7 @@ function sanitizeHtml(html: string): string {
       }
     }
   });
+  tidyRoot(doc.body);
   return doc.body.innerHTML;
 }
 
@@ -343,6 +377,28 @@ function normalizeTone(tone: string): string {
   return "";
 }
 
+function parseSun(day: Record<string, unknown>): TripSun {
+  const raw = day.sun && typeof day.sun === "object" ? (day.sun as Record<string, unknown>) : {};
+  const sun = {
+    sunrise: asString(raw.sunrise).trim(),
+    sunset: asString(raw.sunset).trim(),
+    sunriseCity: asString(raw.sunriseCity).trim(),
+    sunsetCity: asString(raw.sunsetCity).trim(),
+  };
+  if (sun.sunrise || sun.sunset) return sun;
+  const text = asString(day.sunHtml).replace(/<[^>]+>/g, " ");
+  const times = [...text.matchAll(/(\d{1,2}:\d{2})/g)].map((match) => match[1]);
+  return { ...sun, sunrise: times[0] || "", sunset: times[1] || "" };
+}
+
+export function sunLine(day: TripDay): string {
+  const riseCity = day.sun.sunriseCity ? cityLabel(day.sun.sunriseCity) : "";
+  const setCity = day.sun.sunsetCity ? cityLabel(day.sun.sunsetCity) : "";
+  const rise = day.sun.sunrise ? `日出 ${day.sun.sunrise}${riseCity ? `（${riseCity}）` : ""}` : "";
+  const set = day.sun.sunset ? `日落 ${day.sun.sunset}${setCity ? `（${setCity}）` : ""}` : "";
+  return [rise, set].filter(Boolean).join(" · ");
+}
+
 function parseDay(value: unknown, index: number): TripDay {
   if (!value || typeof value !== "object") throw new Error(`第 ${index + 1} 日格式不正確`);
   const day = value as Record<string, unknown>;
@@ -358,13 +414,14 @@ function parseDay(value: unknown, index: number): TripDay {
     walkHtml: sanitizeHtml(asString(day.walkHtml)),
     foodHtml: sanitizeHtml(asString(day.foodHtml)),
     noteHtml: sanitizeHtml(asString(day.noteHtml)),
+    sun: parseSun(day),
     images: imagesRaw.map((image) => {
       const item = (image || {}) as Record<string, unknown>;
       return {
         src: asString(item.src),
         href: asString(item.href),
         alt: asString(item.alt),
-        caption: asString(item.caption),
+        caption: cleanCredit(asString(item.caption)),
       };
     }),
     spots: spotsRaw.map((spot) => {

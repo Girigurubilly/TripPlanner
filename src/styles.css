@@ -942,6 +942,14 @@ figure.refimg img {
   margin: 10px 0;
   font-size: 0.92rem;
 }
+.sunline {
+  background: #f4f7fb;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 8px 14px;
+  margin: 10px 0 0;
+  font-size: 0.92rem;
+}
 .foodtoday {
   background: #fdf6ec;
   border: 1px solid var(--line);
