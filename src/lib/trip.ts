@@ -650,6 +650,130 @@ export function dayMenu(day: TripDay, guide?: TripGuide): DayMeal[] {
     .filter((row) => row.title || row.note || row.places.length);
 }
 
+export type TravelLeg = { from: string; to: string; how: string };
+
+const PLACE_GENERIC = new Set([
+  "museo",
+  "pinacoteca",
+  "basilica",
+  "galleria",
+  "piazza",
+  "hotel",
+  "grand",
+  "novotel",
+  "teatro",
+  "parque",
+  "parco",
+  "tour",
+  "santa",
+  "maria",
+  "della",
+  "degli",
+  "delle",
+  "centro",
+  "center",
+  "madrid",
+  "milan",
+  "milano",
+  "florence",
+  "firenze",
+]);
+
+function nameBits(value: string): string[] {
+  const plain = value.replace(/（[^）]*）/g, " ").replace(/[（）]/g, " ");
+  return [...new Set(plain.split(/[\s→＋+／/、,，·・\-—:：&]+/).map((part) => normName(part)))].filter(
+    (bit) => bit.length >= 4 && !PLACE_GENERIC.has(bit),
+  );
+}
+
+function samePlace(a: string, b: string): boolean {
+  const left = nameBits(a);
+  const right = nameBits(b);
+  if (!left.length || !right.length) return false;
+  return left.some((bit) =>
+    right.some((other) => bit === other || (bit.length >= 5 && other.length >= 5 && (bit.includes(other) || other.includes(bit)))),
+  );
+}
+
+function shortHow(value: string): string {
+  const cut = value.split(/🕐|✅|⚠️/)[0].replace(/\s+/g, " ").trim();
+  if (!cut) return "";
+  return cut.length > 72 ? `${cut.slice(0, 70)}…` : cut;
+}
+
+export function travelLegs(html: string): TravelLeg[] {
+  if (!html || typeof DOMParser === "undefined") return [];
+  const doc = new DOMParser().parseFromString(`<div id="legs">${html}</div>`, "text/html");
+  const root = doc.getElementById("legs");
+  if (!root) return [];
+  return [...root.querySelectorAll("li")].flatMap((item) => {
+    const strong = item.querySelector("strong");
+    const title = (strong?.textContent || "").replace(/\s+/g, " ").trim();
+    const ends = title.split(/\s*→\s*/).map((part) => part.trim()).filter(Boolean);
+    if (ends.length < 2) return [];
+    const how = shortHow((item.textContent || "").replace(title, ""));
+    return [{ from: ends[0], to: ends[ends.length - 1], how }];
+  });
+}
+
+function hopPhrase(path: TravelLeg[]): string {
+  const how = path[path.length - 1]?.how || "";
+  if (!how) return "";
+  if (path.length === 1) return how;
+  const via = path.slice(0, -1).map((leg) => leg.to).filter(Boolean);
+  return via.length ? `經 ${via.join("、")} · ${how}` : how;
+}
+
+function hopBetween(fromName: string, toName: string, legs: TravelLeg[]): string {
+  const start = legs.findIndex((leg) => samePlace(leg.from, fromName));
+  if (start < 0) return "";
+  const path: TravelLeg[] = [];
+  for (let index = start; index < Math.min(legs.length, start + 4); index += 1) {
+    path.push(legs[index]);
+    if (samePlace(legs[index].to, toName)) return hopPhrase(path);
+  }
+  return "";
+}
+
+export function dayRoute(
+  day: TripDay,
+  blocks: { heading: string; html: string }[],
+): { arrive: string; hops: string[] } {
+  const key = day.label.replace(/\s+/g, "").slice(0, 6);
+  const block = blocks.find((item) => item.heading.replace(/\s+/g, "").includes(key));
+  const legs = block ? travelLegs(block.html) : [];
+  const hops = day.spots.slice(0, -1).map((spot, index) => hopBetween(spot.name, day.spots[index + 1].name, legs));
+  const first = day.spots[0];
+  const inbound = first
+    ? [...legs].reverse().find((leg) => samePlace(leg.to, first.name) && !day.spots.some((spot) => samePlace(leg.from, spot.name)))
+    : undefined;
+  const arrive = inbound ? `由 ${inbound.from} · ${inbound.how}` : "";
+  return { arrive, hops };
+}
+
+export function dayKey(value: string): string {
+  const matched = value.match(/([A-Za-z]+)\s*(\d{1,2})/);
+  if (!matched) return "";
+  return `${matched[1].toLowerCase()}${Number(matched[2])}`;
+}
+
+export function diningForSpot(spot: TripSpot, day: TripDay, guide?: TripGuide): FoodPlace[] {
+  const catalog = foodCatalog(guide?.html || "", guide?.places || []).filter((place) => !day.city || !place.city || place.city === day.city);
+  const blob = normName(`${spot.name} ${spot.html.replace(/<[^>]+>/g, " ")}`);
+  const found: FoodPlace[] = [];
+  for (const place of catalog) {
+    const name = normName(place.name);
+    const tokens = place.name
+      .split(/\s+/)
+      .map((part) => normName(part))
+      .filter((part) => part.length >= 5 && !["coffee", "caffe", "hotel"].includes(part));
+    const hit = (name.length >= 4 && blob.includes(name)) || tokens.some((token) => blob.includes(token));
+    if (!hit) continue;
+    if (!found.some((item) => item.name === place.name && item.address === place.address)) found.push(place);
+  }
+  return found.slice(0, 3);
+}
+
 function dishesFromHtml(html: string): { slot: string; title: string; note: string; queries: string[] }[] {
   if (!html || typeof DOMParser === "undefined") return [];
   const doc = new DOMParser().parseFromString(`<div id="dish">${html}</div>`, "text/html");

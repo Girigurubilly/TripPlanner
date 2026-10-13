@@ -20,7 +20,9 @@ import {
 import {
   cityLabel,
   cleanCredit,
-  dayMenu,
+  dayKey,
+  dayRoute,
+  diningForSpot,
   sunLine,
   tidyRoot,
   absorbSaved,
@@ -805,6 +807,7 @@ function Book({
               </dl>
             ) : null}
             <div dangerouslySetInnerHTML={{ __html: `${spotView?.brief || ""}${spotView?.deep || ""}` }} />
+            <SpotDining day={activeDay} spot={spot} guide={trip.guides.find((item) => item.id === "food" || /美食/.test(item.label))} />
           </article>
         ) : null}
 
@@ -1453,6 +1456,12 @@ function DayScreen({
 }) {
   const index = trip.days.findIndex((item) => item.id === day.id);
   const rationale = trip.rationales.find((item) => item.city && item.city === day.city);
+  const todayKey = dayKey(day.label) || dayKey(day.title);
+  const todayPoint = rationale?.points.find((point) => dayKey(point.label) === todayKey);
+  const otherPoints = rationale?.points.filter((point) => point !== todayPoint) || [];
+  const route = useMemo(() => dayRoute(day, trip.transport.blocks), [day, trip.transport.blocks]);
+  const headline = dayHeadline(day);
+  const [hero, ...moreImages] = day.images;
   const readRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (readRef.current) mountBookingChecks(readRef.current, trip.id, false);
@@ -1477,81 +1486,144 @@ function DayScreen({
         第 {index + 1} / {trip.days.length} 日
         {day.city ? ` · ${cityLabel(day.city)}` : ""}
       </p>
-      <h1 className="screen-title">{day.title}</h1>
-      {sunLine(day) ? <p className="sunline">🌅 {sunLine(day)}</p> : null}
-      {day.images.length ? (
-        <div className="dayimgs">
-          {day.images.map((image) => (
+      <p className="day-when">{headline.when}</p>
+      <h1 className="screen-title day-objective">{headline.objective}</h1>
+      {hero ? (
+        <figure className="refimg hero-shot">
+          <a href={hero.href || hero.src} target="_blank" rel="noopener">
+            <img src={hero.src} alt={hero.caption || headline.objective} loading="lazy" />
+          </a>
+          {hero.caption ? <div className="attr">{cleanCredit(hero.caption)}</div> : null}
+        </figure>
+      ) : null}
+      {moreImages.length ? (
+        <div className="dayimgs thumbs">
+          {moreImages.map((image) => (
             <figure className="refimg" key={image.src}>
               <a href={image.href || image.src} target="_blank" rel="noopener">
-                <img src={image.src} alt={image.caption || day.title} loading="lazy" />
+                <img src={image.src} alt={image.caption || headline.objective} loading="lazy" />
               </a>
-              {image.caption ? <div className="attr">{cleanCredit(image.caption)}</div> : null}
             </figure>
           ))}
         </div>
       ) : null}
-      <div className="reading" ref={readRef}>
-        {day.leadHtml ? <Html html={day.leadHtml} /> : null}
-        {day.walkHtml ? <Html html={day.walkHtml} /> : null}
-        <DayMeals day={day} guide={trip.guides.find((item) => item.id === "food" || /美食/.test(item.label))} />
-        {day.noteHtml ? <Html html={day.noteHtml} /> : null}
-      </div>
+      {sunLine(day) ? <p className="sunline">🌅 {sunLine(day)}</p> : null}
+      {day.walkHtml ? <Html html={day.walkHtml} /> : null}
+      {day.leadHtml ? (
+        <div className="reading day-brief" ref={readRef}>
+          <Html html={day.leadHtml} />
+        </div>
+      ) : (
+        <div ref={readRef} />
+      )}
       {day.spots.length ? (
         <>
           <h2 className="section-label">
-            景點
-            <span className="muted">已去 {day.spots.filter((_, index) => visits[visitKey(day.id, index)]).length}／{day.spots.length}</span>
+            今日行程
+            <span className="muted">已去 {day.spots.filter((_, spotIndex) => visits[visitKey(day.id, spotIndex)]).length}／{day.spots.length}</span>
           </h2>
-          <div className="sheet">
+          <div className="sheet plan">
+            {route.arrive ? <p className="hop">{route.arrive}</p> : null}
             {day.spots.map((item, spotIndex) => {
               const at = visits[visitKey(day.id, spotIndex)] || "";
               return (
-                <div className="navrow spotrow" key={`${item.name}-${spotIndex}`} onClick={() => onSpot(spotIndex)}>
-                  <span className="navrow-num">{spotIndex + 1}</span>
-                  <span className="navrow-main">
-                    <strong>{item.name}</strong>
-                    {item.badge ? <em>{item.badge}</em> : null}
-                    {at ? <span className="pill-hint">{visitClock(at)} 已去</span> : null}
-                  </span>
-                  <button
-                    className={at ? "stamp on" : "stamp"}
-                    type="button"
-                    aria-label={at ? "取消打卡" : "打卡"}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      toggleVisit(trip.id, visitKey(day.id, spotIndex), at);
-                    }}
-                  >
-                    {at ? "已去" : "打卡"}
-                  </button>
-                  <span className="navrow-go" aria-hidden="true">›</span>
+                <div key={`${item.name}-${spotIndex}`}>
+                  <div className="navrow spotrow" onClick={() => onSpot(spotIndex)}>
+                    <span className="navrow-num">{spotIndex + 1}</span>
+                    <span className="navrow-main">
+                      <strong>{item.name}</strong>
+                      {item.badge ? <em>{item.badge}</em> : null}
+                      {at ? <span className="pill-hint">{visitClock(at)} 已去</span> : null}
+                    </span>
+                    <button
+                      className={at ? "stamp on" : "stamp"}
+                      type="button"
+                      aria-label={at ? "取消打卡" : "打卡"}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        toggleVisit(trip.id, visitKey(day.id, spotIndex), at);
+                      }}
+                    >
+                      {at ? "已去" : "打卡"}
+                    </button>
+                    <span className="navrow-go" aria-hidden="true">›</span>
+                  </div>
+                  {route.hops[spotIndex] ? <p className="hop">{route.hops[spotIndex]}</p> : null}
                 </div>
               );
             })}
           </div>
         </>
       ) : null}
+      {day.noteHtml ? (
+        <div className="reading day-link">
+          <Html html={day.noteHtml} />
+        </div>
+      ) : null}
       <ExtraStops tripId={trip.id} dayId={day.id} />
-      <DayNotes tripId={trip.id} dayId={day.id} />
       {rationale ? (
         <section className="why">
-          <h2>{rationale.title || "點解咁排"}</h2>
-          {rationale.summary ? <p className="why-summary">{rationale.summary}</p> : null}
-          {rationale.points.length ? (
-            <ul>
-              {rationale.points.map((point) => (
-                <li key={`${point.label}-${point.text.slice(0, 12)}`}>
-                  {point.label ? <span className="why-day">{point.label}</span> : null}
-                  <span>{point.text}</span>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <Html html={rationale.html} />
-          )}
+          <h2>點解今日咁排</h2>
+          {todayPoint ? (
+            <p>{todayPoint.text}</p>
+          ) : rationale.summary ? (
+            <p className="why-summary">{rationale.summary}</p>
+          ) : null}
+          {otherPoints.length ? (
+            <details>
+              <summary>成個{cityLabel(day.city) || "行程"}點排</summary>
+              <ul>
+                {otherPoints.map((point) => (
+                  <li key={`${point.label}-${point.text.slice(0, 12)}`}>
+                    {point.label ? <span className="why-day">{point.label}</span> : null}
+                    <span>{point.text}</span>
+                  </li>
+                ))}
+              </ul>
+            </details>
+          ) : null}
         </section>
       ) : null}
+      <DayNotes tripId={trip.id} dayId={day.id} />
+    </section>
+  );
+}
+
+function dayHeadline(day: TripDay): { when: string; objective: string } {
+  const title = day.title.trim();
+  const cut = title.split(/：|:/);
+  if (cut.length > 1 && cut[0].length <= 24) return { when: cut[0].trim(), objective: cut.slice(1).join("：").trim() };
+  return { when: day.label, objective: title };
+}
+
+function SpotDining({ day, spot, guide }: { day: TripDay; spot: TripSpot; guide?: TripGuide }) {
+  const places = useMemo(() => diningForSpot(spot, day, guide), [spot, day, guide]);
+  if (!places.length) return null;
+  return (
+    <section className="meals">
+      <h2 className="section-label">餐廳</h2>
+      {places.map((place) => (
+        <article className="meal" key={`${place.name}-${place.address}`}>
+          <h3>{place.name}</h3>
+          {place.address ? <p className="tiny">{place.address}</p> : null}
+          {place.lines.length ? (
+            <ul>
+              {place.lines.map((line) => (
+                <li key={line}>{line}</li>
+              ))}
+            </ul>
+          ) : null}
+          {place.links.length ? (
+            <p className="restlinks">
+              {place.links.map((link) => (
+                <a key={link.href} href={link.href} target="_blank" rel="noopener">
+                  {link.label}
+                </a>
+              ))}
+            </p>
+          ) : null}
+        </article>
+      ))}
     </section>
   );
 }
@@ -1637,58 +1709,6 @@ function DayNav({
         <ChevronRight size={18} aria-hidden="true" />
       </button>
     </nav>
-  );
-}
-
-function DayMeals({ day, guide }: { day: TripDay; guide?: TripGuide }) {
-  const rows = useMemo(() => dayMenu(day, guide), [day, guide]);
-  if (!rows.length) return day.foodHtml ? <Html html={day.foodHtml} /> : null;
-  return (
-    <section className="meals">
-      <h2 className="section-label">本日美食</h2>
-      {rows.map((row) => (
-        <article className="meal" key={`${row.slot}-${row.title}`}>
-          {row.slot ? <p className="kicker">{row.slot}</p> : null}
-          {row.places.length ? (
-            <>
-              {row.note ? <p>{row.note}</p> : null}
-              {row.places.map((place) => (
-                <div className="meal-place" key={`${place.name}-${place.address}`}>
-                  <h3>{place.name}</h3>
-                  {place.address ? <p className="tiny">{place.address}</p> : null}
-                  {place.lines.length ? (
-                    <ul>
-                      {place.lines.map((line) => (
-                        <li key={line}>{line}</li>
-                      ))}
-                    </ul>
-                  ) : null}
-                  {place.links.length ? (
-                    <p className="restlinks">
-                      {place.links.map((link) => (
-                        <a key={link.href} href={link.href} target="_blank" rel="noopener">
-                          {link.label}
-                        </a>
-                      ))}
-                    </p>
-                  ) : null}
-                </div>
-              ))}
-            </>
-          ) : (
-            <>
-              <h3>{row.title}</h3>
-              {row.note ? <p>{row.note}</p> : null}
-            </>
-          )}
-        </article>
-      ))}
-      <p className="tiny">
-        <a href="#" data-goto="food">
-          去美食頁睇全部
-        </a>
-      </p>
-    </section>
   );
 }
 

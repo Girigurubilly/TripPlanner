@@ -934,6 +934,57 @@ figure.refimg img {
   color: var(--muted);
   padding: 6px 10px 8px;
 }
+.day-when {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+.day-objective {
+  margin-top: 2px;
+}
+.hero-shot {
+  flex: none;
+  width: 100%;
+  margin: 10px 0 0;
+}
+.hero-shot img {
+  height: 210px;
+}
+.dayimgs.thumbs {
+  margin-top: 8px;
+}
+.dayimgs.thumbs figure.refimg {
+  flex: 0 0 72px;
+  border-radius: 10px;
+}
+.dayimgs.thumbs figure.refimg img {
+  height: 72px;
+}
+.day-brief {
+  margin-top: 8px;
+}
+.day-link {
+  margin: 8px 2px 0;
+}
+.plan .hop {
+  margin: 0;
+  padding: 8px 14px 8px 46px;
+  background: #f3faf8;
+  color: #1d6b5f;
+  font-size: 0.86rem;
+  font-weight: 700;
+  line-height: 1.45;
+  border-top: 1px solid var(--line);
+}
+.why details {
+  margin-top: 8px;
+}
+.why summary {
+  cursor: pointer;
+  color: var(--teal);
+  font-weight: 700;
+  padding: 8px 0;
+}
 .walkload {
   background: #fff8e7;
   border: 1px solid var(--line);
@@ -943,12 +994,9 @@ figure.refimg img {
   font-size: 0.92rem;
 }
 .sunline {
-  background: #f4f7fb;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  padding: 8px 14px;
   margin: 10px 0 0;
-  font-size: 0.92rem;
+  color: var(--muted);
+  font-size: 0.9rem;
 }
 .foodtoday {
   background: #fdf6ec;
