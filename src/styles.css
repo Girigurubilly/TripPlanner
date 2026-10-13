@@ -698,6 +698,48 @@ summary:focus-visible {
   object-fit: cover;
   border-radius: 10px;
 }
+.note {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  color: #5c4a38;
+  font-size: 0.92rem;
+  line-height: 1.5;
+}
+.note h2,
+.note h3 {
+  display: none;
+}
+.note p {
+  margin: 0;
+}
+.eat-read h3 {
+  margin: 18px 0 8px;
+  font-size: 1.2rem;
+  line-height: 1.35;
+  color: var(--navy);
+  scroll-margin-top: 124px;
+}
+.eat-read h4 {
+  margin: 14px 0 6px;
+  font-size: 1.05rem;
+}
+.eat-read img,
+.eat-read .refimg img {
+  width: 100%;
+  height: 168px;
+  object-fit: cover;
+  border-radius: 12px;
+}
+.eat-read ul,
+.eat-read ol {
+  margin: 0 0 12px;
+  padding: 10px 14px 10px 1.3em;
+  background: #fff8f2;
+  border-radius: 12px;
+}
 .guidenav {
   position: fixed;
   left: 0;
@@ -995,19 +1037,21 @@ figure.refimg img {
   color: var(--muted);
   font-size: 0.92rem;
 }
-.facts {
+.dayfacts {
   display: flex;
   gap: 8px;
   margin: 0 0 10px;
   overflow-x: auto;
 }
-.fact {
+.dayfact {
   flex: 0 0 auto;
   min-height: 36px;
   padding: 6px 12px;
   border: 1px solid var(--line);
   border-radius: 999px;
   background: #fff;
+  color: var(--ink);
+  font: inherit;
   font-size: 0.84rem;
   font-weight: 700;
   line-height: 1.3;
@@ -1522,19 +1566,28 @@ a[data-goto] {
   color: var(--teal);
   font-weight: 700;
 }
-.facts div {
+dl.facts {
   display: grid;
-  grid-template-columns: 3.2em minmax(0, 1fr);
   gap: 8px;
-  padding: 8px 0;
-  border-bottom: 1px solid var(--line);
+  margin: 0 0 14px;
 }
-.facts dt {
+dl.facts div {
+  display: block;
+  padding: 10px 12px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+}
+dl.facts dt {
   color: var(--muted);
+  font-size: 0.75rem;
   font-weight: 700;
 }
-.facts dd {
-  margin: 0;
+dl.facts dd {
+  margin: 2px 0 0;
+  font-size: 1.02rem;
+  font-weight: 650;
+  line-height: 1.4;
 }
 .spotbody {
   background: #fff;
@@ -1756,6 +1809,20 @@ a.stamp {
     color: #5c4a38;
     font-weight: 700;
     font-size: 0.95rem;
+  }
+  .book table.stackable tr:has(> td:nth-child(2)):not(:has(> td:nth-child(3))) td::before {
+    content: none;
+  }
+  .book table.stackable tr:has(> td:nth-child(2)):not(:has(> td:nth-child(3))) td:first-child {
+    border-bottom: 0;
+    padding: 8px 0 0;
+    color: var(--muted);
+    font-size: 0.8rem;
+    font-weight: 700;
+    line-height: 1.3;
+  }
+  .book table.stackable tr:has(> td:nth-child(2)):not(:has(> td:nth-child(3))) td:last-child {
+    padding-top: 2px;
   }
 }
 

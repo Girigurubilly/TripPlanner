@@ -818,7 +818,33 @@ function Book({
             <h1 className="screen-title">{trip.title}</h1>
             {trip.subtitle ? <p className="lede">{trip.subtitle}</p> : null}
             {trip.tagline ? <p className="lede">{trip.tagline}</p> : null}
-            {progress.total ? <p className="booked-line">已訂 {progress.done}／{progress.total}</p> : null}
+            {[...new Set(trip.days.map((day) => day.city).filter(Boolean))].length ? (
+              <div className="dayfacts">
+                {[...new Set(trip.days.map((day) => day.city).filter(Boolean))].map((city) => (
+                  <button
+                    className="dayfact"
+                    type="button"
+                    key={city}
+                    onClick={() => {
+                      const day = trip.days.find((item) => item.city === city);
+                      if (!day) return;
+                      onDay(day.id);
+                      onTab("days");
+                    }}
+                  >
+                    {cityLabel(city)}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+            {progress.total ? (
+              <>
+                <p className="booked-line">已訂 {progress.done}／{progress.total}</p>
+                <div className="meter" aria-hidden="true">
+                  <span style={{ width: `${Math.round((progress.done / progress.total) * 100)}%` }} />
+                </div>
+              </>
+            ) : null}
             <Overview html={trip.overviewHtml} tripId={trip.id} />
           </article>
         ) : null}
@@ -871,7 +897,7 @@ function Book({
                 ))}
               </div>
             ) : null}
-            <article className="reading" dangerouslySetInnerHTML={{ __html: anchored.html }} />
+            <article className="guide-read eat-read" dangerouslySetInnerHTML={{ __html: anchored.html }} />
           </section>
         ) : null}
 
@@ -1715,11 +1741,11 @@ function DayFacts({ day }: { day: TripDay }) {
   if (!km && !load && !sun && !text) return null;
   return (
     <>
-      <div className="facts">
-        {km ? <span className="fact">步行 {km} km</span> : null}
-        {load ? <span className="fact">負荷 {load}</span> : null}
-        {sun ? <span className="fact">🌅 {sun.replace(/（[^）]*）/g, "")}</span> : null}
-        {!km && !load && text ? <span className="fact">{text.replace(/^🚶\s*/, "")}</span> : null}
+      <div className="dayfacts">
+        {km ? <span className="dayfact">步行 {km} km</span> : null}
+        {load ? <span className="dayfact">負荷 {load}</span> : null}
+        {sun ? <span className="dayfact">🌅 {sun.replace(/（[^）]*）/g, "")}</span> : null}
+        {!km && !load && text ? <span className="dayfact">{text.replace(/^🚶\s*/, "")}</span> : null}
       </div>
       {rest ? <p className="restline">建議抖位：{rest}</p> : null}
     </>
@@ -1875,34 +1901,37 @@ function CheckIn({ at, onToggle }: { at: string; onToggle: () => void }) {
 
 function Transport({ trip }: { trip: TripBook }) {
   const days = trip.days.filter((day) => day.rides.length);
-  const covered = new Set(days.map((day) => day.label.replace(/\s+/g, "").slice(0, 6)));
-  const leftover = trip.transport.blocks.filter((block) => !covered.has(block.heading.replace(/\s+/g, "").slice(0, 6)) && !days.some((day) => block.heading.replace(/\s+/g, "").includes(day.label.replace(/\s+/g, "").slice(0, 6))));
+  const [picked, setPicked] = useState(days[0]?.id || "");
+  const day = days.find((item) => item.id === picked) || days[0];
+  const covered = new Set(days.map((item) => item.label.replace(/\s+/g, "").slice(0, 6)));
+  const leftover = trip.transport.blocks.filter((block) => !covered.has(block.heading.replace(/\s+/g, "").slice(0, 6)) && !days.some((item) => block.heading.replace(/\s+/g, "").includes(item.label.replace(/\s+/g, "").slice(0, 6))));
   return (
     <section className="screen">
       {days.length ? (
-        <div className="daystrip anchorstrip">
-          {days.map((day) => (
-            <div
-              key={day.id}
-              className="daychip"
-              onClick={() => document.getElementById(`leg-${day.id}`)?.scrollIntoView({ behavior: "smooth", block: "start" })}
-            >
-              {dayChip(day).num}
-            </div>
-          ))}
+        <div className="daystrip dayjump">
+          {days.map((item) => {
+            const chip = dayChip(item);
+            const on = item.id === day?.id;
+            return (
+              <div key={item.id} className={on ? "daychip on" : "daychip"} onClick={() => setPicked(item.id)}>
+                <b>{chip.num}</b>
+                {chip.hint ? <small>{chip.hint}</small> : null}
+              </div>
+            );
+          })}
         </div>
       ) : null}
-      {trip.transport.introHtml ? <div className="reading" dangerouslySetInnerHTML={{ __html: trip.transport.introHtml }} /> : null}
-      {days.map((day) => (
-        <article className="reading block" id={`leg-${day.id}`} key={day.id}>
-          <h2>{day.label}</h2>
+      {trip.transport.introHtml ? <div className="note" dangerouslySetInnerHTML={{ __html: trip.transport.introHtml }} /> : null}
+      {day ? (
+        <article id={`leg-${day.id}`}>
+          <h2 className="section-label">{day.label}</h2>
           <div className="sheet plan">
             {day.rides.map((ride) => (
               <RideCard key={`${day.id}-${ride.from}-${ride.to}-${ride.detail}`} ride={ride} />
             ))}
           </div>
         </article>
-      ))}
+      ) : null}
       {leftover.map((block) => (
         <article className="reading block" key={block.heading}>
           <div dangerouslySetInnerHTML={{ __html: block.html }} />

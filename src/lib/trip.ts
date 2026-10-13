@@ -806,9 +806,9 @@ function parseRides(value: unknown): Ride[] {
 }
 
 function rideMode(text: string): string {
-  const start = text.split(/—|或/)[0].trim().slice(0, 16);
+  const start = text.split(/—|或/)[0].trim().slice(0, 48);
   if (/飛機|航班/.test(start)) return "飛機";
-  if (/火車|特快|高鐵/.test(start)) return "火車";
+  if (/火車|特快|高鐵|Express|FR\d/i.test(start)) return "火車";
   if (/巴士|公車|電車|有軌/.test(start)) return "巴士";
   if (/的士|計程車|taxi/i.test(start)) return "的士";
   if (/地鐵|捷運/.test(start)) return "地鐵";
