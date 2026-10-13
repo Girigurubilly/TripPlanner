@@ -661,6 +661,64 @@ export function dayMenu(day: TripDay, guide?: TripGuide): DayMeal[] {
     .filter((row) => row.title || row.note || row.places.length);
 }
 
+export type SouvenirItem = { name: string; detail: string; links: FoodLink[] };
+
+export function daySouvenirs(day: TripDay, guide?: TripGuide): { items: SouvenirItem[]; notes: string[] } {
+  const empty = { items: [] as SouvenirItem[], notes: [] as string[] };
+  const html = guide?.html || "";
+  if (!html || typeof DOMParser === "undefined") return empty;
+  const doc = new DOMParser().parseFromString(`<div id="souv">${html}</div>`, "text/html");
+  const root = doc.getElementById("souv");
+  if (!root) return empty;
+  const city = day.city.trim().toLowerCase();
+  type Section = { city: string; items: SouvenirItem[]; notes: string[] };
+  const sections: Section[] = [];
+  // Each city section is an <h3> naming the city followed by an <ol> of items.
+  for (const head of [...root.querySelectorAll("h3")]) {
+    let list: HTMLOListElement | null = null;
+    let sib = head.nextElementSibling;
+    while (sib && sib.tagName !== "H3") {
+      if (sib.tagName === "OL") {
+        list = sib as HTMLOListElement;
+        break;
+      }
+      sib = sib.nextElementSibling;
+    }
+    if (!list) continue;
+    const items: SouvenirItem[] = [...list.querySelectorAll(":scope > li")].map((li) => {
+      const strong = li.querySelector(":scope > strong");
+      const name = (strong?.textContent || "").replace(/\s+/g, " ").trim();
+      const clone = li.cloneNode(true) as HTMLElement;
+      clone.querySelectorAll(".restlinks").forEach((node) => node.remove());
+      const whole = (clone.textContent || "").replace(/\s+/g, " ").trim();
+      const detail = whole.replace(name, "").replace(/^[：:\-—\s]+/, "").trim();
+      return { name: name || whole, detail, links: linksIn(li) };
+    });
+    // Trailing tip paragraphs after the list, up to the next <h3> / <hr>.
+    const notes: string[] = [];
+    let tail = list.nextElementSibling;
+    while (tail && tail.tagName !== "H3") {
+      if (tail.tagName === "HR") break;
+      if (tail.tagName === "P") {
+        const text = (tail.textContent || "").replace(/\s+/g, " ").trim();
+        if (text && !text.startsWith("小總結")) notes.push(text);
+      }
+      tail = tail.nextElementSibling;
+    }
+    sections.push({ city: cityHint(head.textContent || ""), items, notes });
+  }
+  if (!sections.length) return empty;
+  const local = city ? sections.find((section) => section.city === city) : undefined;
+  if (local) return local;
+  const blank = sections.find((section) => !section.city);
+  if (blank) return blank;
+  // No city match: show everything rather than an empty box.
+  return {
+    items: sections.flatMap((section) => section.items),
+    notes: sections.flatMap((section) => section.notes),
+  };
+}
+
 const PLACE_GENERIC = new Set([
   "museo",
   "pinacoteca",
