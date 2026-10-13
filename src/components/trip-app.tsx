@@ -1464,40 +1464,62 @@ function DayScreen({
   const route = planItems(day);
   const headline = dayHeadline(day);
   const [hero, ...moreImages] = day.images;
+  const chipRef = useRef<HTMLDivElement>(null);
   const readRef = useRef<HTMLDivElement>(null);
+  const seen = day.spots.filter((_, spotIndex) => visits[visitKey(day.id, spotIndex)]).length;
+  useEffect(() => {
+    const strip = chipRef.current?.parentElement;
+    const chip = chipRef.current;
+    if (!strip || !chip) return;
+    strip.scrollTo({ left: chip.offsetLeft - strip.clientWidth / 2 + chip.clientWidth / 2, behavior: "smooth" });
+  }, [day.id]);
   useEffect(() => {
     if (readRef.current) mountBookingChecks(readRef.current, trip.id, false);
   }, [day, trip.id]);
   return (
     <section className="screen">
-      <div className="daystrip" aria-label="日期">
+      <div className="daystrip dayjump" aria-label="日期">
         {trip.days.map((item) => {
           const chip = dayChip(item);
+          const on = item.id === day.id;
           return (
             <div
               key={item.id}
-              className={item.id === day.id ? "daychip on" : "daychip"}
+              ref={on ? chipRef : undefined}
+              className={on ? "daychip on" : "daychip"}
               onClick={() => onDay(item.id)}
             >
-              {chip.num}
+              <b>{chip.num}</b>
+              {chip.hint ? <small>{chip.hint}</small> : null}
             </div>
           );
         })}
       </div>
-      <p className="eyebrow">
-        第 {index + 1} / {trip.days.length} 日
-        {day.city ? ` · ${cityLabel(day.city)}` : ""}
-      </p>
-      <p className="day-when">{headline.when}</p>
-      <h1 className="screen-title day-objective">{headline.objective}</h1>
       {hero ? (
-        <figure className="refimg hero-shot">
+        <figure className="refimg cover">
           <a href={hero.href || hero.src} target="_blank" rel="noopener">
             <img src={hero.src} alt={hero.caption || headline.objective} loading="lazy" />
           </a>
           {hero.caption ? <div className="attr">{cleanCredit(hero.caption)}</div> : null}
+          <figcaption>
+            <p className="eyebrow">
+              第 {index + 1} / {trip.days.length} 日
+              {day.city ? ` · ${cityLabel(day.city)}` : ""}
+            </p>
+            <p className="day-when">{headline.when}</p>
+            <h1>{headline.objective}</h1>
+          </figcaption>
         </figure>
-      ) : null}
+      ) : (
+        <>
+          <p className="eyebrow">
+            第 {index + 1} / {trip.days.length} 日
+            {day.city ? ` · ${cityLabel(day.city)}` : ""}
+          </p>
+          <p className="day-when">{headline.when}</p>
+          <h1 className="screen-title day-objective">{headline.objective}</h1>
+        </>
+      )}
       {moreImages.length ? (
         <div className="dayimgs thumbs">
           {moreImages.map((image) => (
@@ -1509,22 +1531,38 @@ function DayScreen({
           ))}
         </div>
       ) : null}
-      {sunLine(day) ? <p className="sunline">🌅 {sunLine(day)}</p> : null}
-      {day.walkHtml ? <Html html={day.walkHtml} /> : null}
-      {day.leadHtml ? (
-        <div className="reading day-brief" ref={readRef}>
-          <Html html={day.leadHtml} />
-        </div>
-      ) : (
-        <div ref={readRef} />
-      )}
+      <DayFacts day={day} />
+      <div ref={readRef}>
+        {day.leadHtml ? (
+          leadLong(day.leadHtml) ? (
+            <details className="fold day-brief">
+              <summary className="fold-bar">
+                <strong>今日注意</strong>
+                <span />
+              </summary>
+              <div className="reading">
+                <Html html={day.leadHtml} />
+              </div>
+            </details>
+          ) : (
+            <div className="reading day-brief">
+              <Html html={day.leadHtml} />
+            </div>
+          )
+        ) : null}
+      </div>
       {day.spots.length || day.rides.length ? (
         <>
           <h2 className="section-label">
             今日行程
-            <span className="muted">已去 {day.spots.filter((_, spotIndex) => visits[visitKey(day.id, spotIndex)]).length}／{day.spots.length}</span>
+            <span className="muted">已去 {seen}／{day.spots.length}</span>
           </h2>
-          <div className="sheet plan">
+          {day.spots.length ? (
+            <div className="meter" aria-hidden="true">
+              <span style={{ width: `${Math.round((seen / day.spots.length) * 100)}%` }} />
+            </div>
+          ) : null}
+          <div className="timeline">
             {route.map((item) => {
               if (item.kind === "ride")
                 return (
@@ -1532,8 +1570,8 @@ function DayScreen({
                     key={`${item.ride.from}-${item.ride.to}-${item.ride.detail}`}
                     ride={item.ride}
                     onOpenSpot={(name) => {
-                      const index = day.spots.findIndex((spot) => spot.name === name);
-                      if (index >= 0) onSpot(index);
+                      const spotIndex = day.spots.findIndex((spot) => spot.name === name);
+                      if (spotIndex >= 0) onSpot(spotIndex);
                     }}
                   />
                 );
@@ -1541,31 +1579,32 @@ function DayScreen({
               const spotItem = day.spots[spotIndex];
               const at = visits[visitKey(day.id, spotIndex)] || "";
               return (
-                <div className="navrow spotrow" key={`${spotItem.name}-${spotIndex}`} onClick={() => onSpot(spotIndex)}>
-                  <span className="navrow-num">{spotIndex + 1}</span>
-                  <span className="navrow-main">
-                    <strong>{spotItem.name}</strong>
-                    {spotItem.badge ? <em>{spotItem.badge}</em> : null}
-                    {spotItem.address || spotItem.price ? (
-                      <small className="tiny">
-                        {[spotItem.address, spotItem.price].filter(Boolean).join(" · ")}
-                      </small>
-                    ) : null}
-                    {at ? <span className="pill-hint">{visitClock(at)} 已去</span> : null}
-                  </span>
-                  <button
-                    className={at ? "stamp on" : "stamp"}
-                    type="button"
-                    aria-label={at ? "取消打卡" : "打卡"}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      toggleVisit(trip.id, visitKey(day.id, spotIndex), at);
-                    }}
-                  >
-                    {at ? "已去" : "打卡"}
-                  </button>
-                  <span className="navrow-go" aria-hidden="true">›</span>
-                </div>
+                <article className={at ? "stop done" : "stop"} key={`${spotItem.name}-${spotIndex}`}>
+                  <span className="stop-num">{spotIndex + 1}</span>
+                  <div className="stop-card" onClick={() => onSpot(spotIndex)} role="link">
+                    <span className="stop-copy">
+                      <strong>
+                        {spotItem.name}
+                        {spotItem.badge ? <em>{spotItem.badge}</em> : null}
+                      </strong>
+                      {spotItem.address || spotItem.price ? (
+                        <small>{[spotItem.address, spotItem.price].filter(Boolean).join(" · ")}</small>
+                      ) : null}
+                      {at ? <span className="pill-hint">{visitClock(at)} 已去</span> : null}
+                    </span>
+                    <button
+                      className={at ? "stamp on" : "stamp"}
+                      type="button"
+                      aria-label={at ? "取消打卡" : "打卡"}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        toggleVisit(trip.id, visitKey(day.id, spotIndex), at);
+                      }}
+                    >
+                      {at ? "已去" : "打卡"}
+                    </button>
+                  </div>
+                </article>
               );
             })}
           </div>
@@ -1635,35 +1674,55 @@ function planItems(day: TripDay): Array<{ kind: "ride"; ride: Ride } | { kind: "
 }
 
 function RideCard({ ride, onOpenSpot }: { ride: Ride; onOpenSpot?: (spotName: string) => void }) {
-  const line = [ride.mode, ride.detail, ride.price].filter(Boolean).join(" · ");
-  // A ride that leads to a spot opens that spot's detail, so the destination
-  // is tappable from the timeline itself.
+  const line = [ride.detail, ride.price].filter(Boolean).join(" · ");
+  const [open, setOpen] = useState(false);
   const openable = Boolean(ride.spot && onOpenSpot);
+  const longNote = ride.note.length > 36;
   return (
-    <div
-      className="ride"
-      role={openable ? "button" : undefined}
-      tabIndex={openable ? 0 : undefined}
-      style={openable ? { cursor: "pointer" } : undefined}
-      onClick={openable ? () => onOpenSpot?.(ride.spot) : undefined}
-      onKeyDown={
-        openable
-          ? (event) => {
-              if (event.key === "Enter" || event.key === " ") {
-                event.preventDefault();
-                onOpenSpot?.(ride.spot);
-              }
-            }
-          : undefined
-      }
-    >
-      <strong>
-        {ride.from} → {ride.to}
-        {openable ? " ›" : ""}
-      </strong>
-      {line ? <p>{line}</p> : null}
-      {ride.note ? <p className="tiny">{ride.note}</p> : null}
+    <div className={openable ? "leg openable" : "leg"}>
+      <button className="leg-main" type="button" disabled={!openable} onClick={() => openable && onOpenSpot?.(ride.spot)}>
+        <span className="mode">{ride.mode || "前往"}</span>
+        <span>
+          <strong>
+            {ride.from} → {ride.to}
+          </strong>
+          {line ? <small>{line}</small> : null}
+        </span>
+      </button>
+      {ride.note ? (
+        longNote && !open ? (
+          <button className="leg-more" type="button" onClick={() => setOpen(true)}>
+            班次詳情
+          </button>
+        ) : (
+          <p className="tiny">{ride.note}</p>
+        )
+      ) : null}
     </div>
+  );
+}
+
+function leadLong(html: string): boolean {
+  return html.replace(/<[^>]+>/g, "").replace(/\s+/g, "").length > 80;
+}
+
+function DayFacts({ day }: { day: TripDay }) {
+  const text = day.walkHtml.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+  const km = text.match(/([\d.]+)\s*km/i)?.[1] || "";
+  const load = text.match(/負荷\s*(🟢|🟡|🔴)/u)?.[1] || "";
+  const rest = text.split("建議抖位：")[1]?.split("。")[0]?.trim() || "";
+  const sun = sunLine(day);
+  if (!km && !load && !sun && !text) return null;
+  return (
+    <>
+      <div className="facts">
+        {km ? <span className="fact">步行 {km} km</span> : null}
+        {load ? <span className="fact">負荷 {load}</span> : null}
+        {sun ? <span className="fact">🌅 {sun.replace(/（[^）]*）/g, "")}</span> : null}
+        {!km && !load && text ? <span className="fact">{text.replace(/^🚶\s*/, "")}</span> : null}
+      </div>
+      {rest ? <p className="restline">建議抖位：{rest}</p> : null}
+    </>
   );
 }
 
@@ -1674,15 +1733,14 @@ function dayHeadline(day: TripDay): { when: string; objective: string } {
   return { when: day.label, objective: title };
 }
 
-function FoldBox({ title, children }: { title: string; children: ReactNode }) {
-  // Collapsed by default; the header is the tap target. Callers pass
-  // key={day.id} so switching days starts collapsed again.
+function FoldBox({ title, count, children }: { title: string; count?: number; children: ReactNode }) {
   const [open, setOpen] = useState(false);
   return (
     <section className="meals">
-      <button type="button" className="section-label fold-head" aria-expanded={open} onClick={() => setOpen(!open)}>
+      <button type="button" className="fold-card" aria-expanded={open} onClick={() => setOpen(!open)}>
         <span>{title}</span>
-        <span aria-hidden="true">{open ? "▾" : "▸"}</span>
+        {count ? <em>{count}</em> : null}
+        <span className="fold-go">{open ? "收起" : "展開"}</span>
       </button>
       {open ? children : null}
     </section>
@@ -1694,7 +1752,7 @@ function DayMeals({ trip, day }: { trip: TripBook; day: TripDay }) {
   const menu = useMemo(() => dayMenu(day, guide), [day, guide]);
   if (!menu.length) return null;
   return (
-    <FoldBox title="今日美食">
+    <FoldBox title="今日美食" count={menu.length}>
       {menu.map((meal, index) => (
         <article className="meal" key={`${meal.slot}-${meal.title}-${index}`}>
           <h3>
@@ -1735,7 +1793,7 @@ function DaySouvenirs({ trip, day }: { trip: TripBook; day: TripDay }) {
   const found = useMemo(() => daySouvenirs(day, guide), [day, guide]);
   if (!found.items.length) return null;
   return (
-    <FoldBox title="今日手信">
+    <FoldBox title="今日手信" count={found.items.length}>
       {found.items.map((item) => (
         <article className="meal" key={item.name}>
           <h3>{item.name}</h3>
