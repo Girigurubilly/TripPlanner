@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent, type ReactNode } from "react";
+import { TripMap } from "./trip-map";
 import {
   BookOpen,
   CalendarDays,
@@ -611,7 +612,7 @@ function Book({
     ? "eat"
     : guideIds.has(activeTab) || activeTab === "guides"
       ? "guides"
-      : activeTab === "days" || activeTab === "transport"
+      : activeTab === "days" || activeTab === "transport" || activeTab === "map"
         ? activeTab
         : "overview";
 
@@ -692,6 +693,7 @@ function Book({
   if (spot) screenTitle = spot.name;
   else if (rootTab === "days" && activeDay) screenTitle = activeDay.label || activeDay.title;
   else if (rootTab === "transport") screenTitle = "交通";
+  else if (rootTab === "map") screenTitle = "地圖";
   else if (openEat) screenTitle = "美食手信";
   else if (topic) screenTitle = topic.title;
   else if (openGuide) screenTitle = openGuide.label;
@@ -862,11 +864,25 @@ function Book({
               setSpotAt(index);
               window.scrollTo({ top: 0 });
             }}
+            onMap={() => onTab("map")}
             visits={visits}
           />
         ) : null}
 
         {!searching && !spot && rootTab === "transport" ? <Transport trip={trip} dayId={activeDay?.id || ""} onDay={onDay} /> : null}
+
+        {!searching && !spot && rootTab === "map" && activeDay ? (
+          <TripMap
+            trip={trip}
+            day={activeDay}
+            onDay={onDay}
+            onSpot={(index) => {
+              setSpotAt(index);
+              onTab("days");
+              window.scrollTo({ top: 0 });
+            }}
+          />
+        ) : null}
 
         {!searching && !spot && rootTab === "eat" && openEat ? (
           <section className="screen">
@@ -959,7 +975,7 @@ function Book({
           <article className="screen reading" dangerouslySetInnerHTML={{ __html: topicHtml || topic.html }} />
         ) : null}
 
-        {trip.footer && !searching && !spot && topicAt === null ? <p className="foot">{trip.footer}</p> : null}
+        {trip.footer && !searching && !spot && topicAt === null && rootTab !== "map" ? <p className="foot">{trip.footer}</p> : null}
         {!searching && !spot && topicAt === null && rootTab === "overview" ? (
           <button className="btn save-trip" type="button" onClick={() => void downloadTrip(trip)}>
             <Download size={18} aria-hidden="true" />
@@ -972,6 +988,7 @@ function Book({
           ["overview", "總覽"],
           ["days", "每日"],
           ["transport", "交通"],
+          ["map", "地圖"],
           [eatGuides[0]?.id || "food", "美食"],
           ["guides", "指南"],
         ].filter(([id]) => id !== "food" || eatGuides.length).map(([id, label]) => (
@@ -1475,12 +1492,14 @@ function DayScreen({
   visits,
   onDay,
   onSpot,
+  onMap,
 }: {
   trip: TripBook;
   day: TripDay;
   visits: Record<string, string>;
   onDay: (id: string) => void;
   onSpot: (index: number) => void;
+  onMap: () => void;
 }) {
   const index = trip.days.findIndex((item) => item.id === day.id);
   const rationale = trip.rationales.find((item) => item.city && item.city === day.city);
@@ -1581,7 +1600,12 @@ function DayScreen({
         <>
           <h2 className="section-label">
             今日行程
-            <span className="muted">已去 {seen}／{day.spots.length}</span>
+            <span className="label-actions">
+              <button className="map-jump" type="button" onClick={onMap}>
+                地圖
+              </button>
+              <span className="muted">已去 {seen}／{day.spots.length}</span>
+            </span>
           </h2>
           {day.spots.length ? (
             <div className="meter" aria-hidden="true">
