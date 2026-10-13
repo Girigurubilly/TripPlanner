@@ -814,15 +814,26 @@ export function dayKey(value: string): string {
 }
 
 export function diningForSpot(spot: TripSpot, day: TripDay, guide?: TripGuide): FoodPlace[] {
-  const catalog = foodCatalog(guide?.html || "", guide?.places || []).filter((place) => !day.city || !place.city || place.city === day.city);
+  const full = foodCatalog(guide?.html || "", guide?.places || []);
+  const local = full.filter((place) => !day.city || !place.city || place.city === day.city);
+  // Transfer days (e.g. Dec 26 Florence→Madrid) carry spots from a second city;
+  // if nothing matches locally, retry against the full catalog by exact name
+  // only — token matches across cities are too noisy (e.g. "galleria").
+  const found = matchDining(spot, local, true);
+  return found.length ? found : matchDining(spot, full, false);
+}
+
+function matchDining(spot: TripSpot, catalog: FoodPlace[], allowTokens: boolean): FoodPlace[] {
   const blob = normName(`${spot.name} ${spot.html.replace(/<[^>]+>/g, " ")}`);
   const found: FoodPlace[] = [];
   for (const place of catalog) {
     const name = normName(place.name);
-    const tokens = place.name
-      .split(/\s+/)
-      .map((part) => normName(part))
-      .filter((part) => part.length >= 5 && !["coffee", "caffe", "hotel"].includes(part));
+    const tokens = allowTokens
+      ? place.name
+          .split(/\s+/)
+          .map((part) => normName(part))
+          .filter((part) => part.length >= 5 && !["coffee", "caffe", "hotel", "galleria"].includes(part))
+      : [];
     const hit = (name.length >= 4 && blob.includes(name)) || tokens.some((token) => blob.includes(token));
     if (!hit) continue;
     if (!found.some((item) => item.name === place.name && item.address === place.address)) found.push(place);
