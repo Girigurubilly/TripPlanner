@@ -810,7 +810,14 @@ function Book({
                 {spotView.price ? <div><dt>費用</dt><dd>{spotView.price}</dd></div> : null}
               </dl>
             ) : null}
-            <div dangerouslySetInnerHTML={{ __html: `${spotView?.brief || ""}${spotView?.deep || ""}` }} />
+            {spot.image ? (
+              <figure className="spot-figure">
+                <a href={spot.image} target="_blank" rel="noopener">
+                  <img src={spot.image} alt={spot.name} loading="lazy" />
+                </a>
+              </figure>
+            ) : null}
+            {spotView ? <SpotBody brief={spotView.brief} deep={spotView.deep} /> : null}
             <SpotDining day={activeDay} spot={spot} guide={trip.guides.find((item) => item.id === "food" || /美食/.test(item.label))} />
           </article>
         ) : null}
@@ -1243,6 +1250,40 @@ function presentSpot(spot: TripSpot): { hours: string; address: string; price: s
 
 type GuideSlice = { title: string; html: string };
 
+/**
+ * Spot description: the brief is clamped to ~2 lines with a 展開全文 toggle
+ * when it is long, and the 深度導覽 section starts collapsed. Keeps a spot
+ * page from opening as a wall of text; the reference image (if any) sits
+ * above this component in the detail view.
+ */
+function SpotBody({ brief, deep }: { brief: string; deep: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const plain = brief.replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
+  const longBrief = plain.length > 140;
+  // presentSpot already includes the 深度導覽 <h4> inside deep; drop it here
+  // so the <details> summary doesn't repeat the same heading.
+  const deepBody = deep.replace(/^\s*<h4>.*?<\/h4>/, "");
+  return (
+    <>
+      <div
+        className={longBrief && !expanded ? "spot-body clamp" : "spot-body"}
+        dangerouslySetInnerHTML={{ __html: brief }}
+      />
+      {longBrief ? (
+        <button className="spot-more" type="button" onClick={() => setExpanded((value) => !value)}>
+          {expanded ? "收起 ▲" : "展開全文 ▼"}
+        </button>
+      ) : null}
+      {deep ? (
+        <details className="spot-deep">
+          <summary>📖 深度導覽</summary>
+          <div dangerouslySetInnerHTML={{ __html: deepBody }} />
+        </details>
+      ) : null}
+    </>
+  );
+}
+
 function headingLabel(el: HTMLElement): string {
   const own = [...el.childNodes]
     .filter((node) => node.nodeType === Node.TEXT_NODE)
@@ -1632,6 +1673,11 @@ function DayScreen({
                 <article className={at ? "stop done" : "stop"} key={`${spotItem.name}-${spotIndex}`}>
                   <span className="stop-num">{spotIndex + 1}</span>
                   <div className="stop-card" onClick={() => onSpot(spotIndex)} role="link">
+                    {spotItem.image ? (
+                      <img className="stop-thumb" src={spotItem.image} alt="" loading="lazy" />
+                    ) : (
+                      <span className="stop-thumb empty" aria-hidden="true">📷</span>
+                    )}
                     <span className="stop-copy">
                       <strong>
                         {spotItem.name}
