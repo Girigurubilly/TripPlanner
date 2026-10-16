@@ -12,6 +12,8 @@ export type TripSpot = {
   hours: string;
   address: string;
   price: string;
+  /** Optional reference-image URL (Wikimedia Commons thumb). Empty = placeholder. */
+  image: string;
   html: string;
 };
 
@@ -969,6 +971,7 @@ function parseDay(value: unknown, index: number): TripDay {
         hours: facts.hours,
         address: facts.address,
         price: facts.price,
+        image: asString(item.image).trim(),
         html: facts.html,
       };
     }),
