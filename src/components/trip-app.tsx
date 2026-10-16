@@ -1258,34 +1258,23 @@ function presentSpot(spot: TripSpot): { hours: string; address: string; price: s
 type GuideSlice = { title: string; html: string };
 
 /**
- * Spot description: the brief is clamped to ~2 lines with a 展開全文 toggle
- * when it is long, and the 深度導覽 section starts collapsed. Keeps a spot
- * page from opening as a wall of text; the reference image (if any) sits
- * above this component in the detail view.
+ * Spot description: the brief renders in full, and the 深度導覽 section
+ * renders expanded. No clamping, no expand/collapse toggles on the spot
+ * detail page — everything is readable without clicking. The reference
+ * image (if any) sits above this component in the detail view.
  */
 function SpotBody({ brief, deep }: { brief: string; deep: string }) {
-  const [expanded, setExpanded] = useState(false);
-  const plain = brief.replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
-  const longBrief = plain.length > 140;
   // presentSpot already includes the 深度導覽 <h4> inside deep; drop it here
-  // so the <details> summary doesn't repeat the same heading.
+  // so the section heading below doesn't repeat it.
   const deepBody = deep.replace(/^\s*<h4>.*?<\/h4>/, "");
   return (
     <>
-      <div
-        className={longBrief && !expanded ? "spot-body clamp" : "spot-body"}
-        dangerouslySetInnerHTML={{ __html: brief }}
-      />
-      {longBrief ? (
-        <button className="spot-more" type="button" onClick={() => setExpanded((value) => !value)}>
-          {expanded ? "收起 ▲" : "展開全文 ▼"}
-        </button>
-      ) : null}
+      <div className="spot-body" dangerouslySetInnerHTML={{ __html: brief }} />
       {deep ? (
-        <details className="spot-deep">
-          <summary>📖 深度導覽</summary>
+        <div className="spot-deep">
+          <h4>📖 深度導覽</h4>
           <div dangerouslySetInnerHTML={{ __html: deepBody }} />
-        </details>
+        </div>
       ) : null}
     </>
   );
