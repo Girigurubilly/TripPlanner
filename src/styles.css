@@ -2090,6 +2090,14 @@ a.stamp {
 .map-pin.extra span {
   background: var(--teal);
 }
+/* Pin colours match the timeline kinds: sight = navy (default),
+   meal = accent orange, hotel = teal-700. Selected pin stays accent. */
+.map-pin.meal span {
+  background: var(--accent);
+}
+.map-pin.hotel span {
+  background: #0f766e;
+}
 .label-actions {
   display: flex;
   align-items: center;

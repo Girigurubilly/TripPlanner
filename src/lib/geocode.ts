@@ -40,6 +40,30 @@ export function cityCenter(city: string): GeoPoint | null {
   return CENTER[city.trim().toLowerCase()] || null;
 }
 
+/** Detect which city a place belongs to from its address/name text, so
+ *  transfer days (Milan → Florence, Florence → Madrid) geocode each
+ *  entry against its own city instead of the day's start city. Falls
+ *  back to the day's city when the text names no known city. */
+const CITY_TOKENS: Array<[RegExp, string]> = [
+  [/milano|milan/i, "milan"],
+  [/firenze|florence/i, "florence"],
+  [/roma|rome/i, "rome"],
+  [/venezia|venice/i, "venice"],
+  [/madrid/i, "madrid"],
+  [/barcelona/i, "barcelona"],
+  [/osaka|大阪/i, "osaka"],
+  [/kyoto|京都/i, "kyoto"],
+  [/tokyo|東京/i, "tokyo"],
+  [/hong\s*kong|香港/i, "hongkong"],
+];
+
+export function cityKeyFor(text: string, fallbackCity: string): string {
+  for (const [pattern, key] of CITY_TOKENS) {
+    if (pattern.test(text)) return key;
+  }
+  return fallbackCity.trim().toLowerCase();
+}
+
 export function mapQuery(name: string, city: string): string {
   const head = name.split("（")[0].replace(/[（(].*$/, "").trim();
   const latin = head.replace(/[^\p{Script=Latin}\d\s.'’&,/-]/gu, " ").replace(/\s+/g, " ").trim();

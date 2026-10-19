@@ -1,22 +1,38 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import "leaflet/dist/leaflet.css";
 import type { LayerGroup, Map as LeafletMap } from "leaflet";
-import type { ExtraStop, TripBook, TripDay } from "../lib/trip";
-import { cityLabel, loadExtras } from "../lib/trip";
-import { canMap, cityCenter, geocode, mapQuery, type GeoPoint } from "../lib/geocode";
+import type { DayEntry, ExtraStop, TripBook, TripDay } from "../lib/trip";
+import { cityLabel, loadExtras, mapEntryTargets } from "../lib/trip";
+import { cityCenter, geocode, type GeoPoint } from "../lib/geocode";
 
-type Pin = { index: number; name: string; point: GeoPoint | null; extra?: boolean };
+type Pin = {
+  entry: DayEntry;
+  num: number;
+  kind: "spot" | "meal" | "hotel";
+  name: string;
+  query: string | null;
+  bias: GeoPoint | null;
+  point: GeoPoint | null;
+};
+
+type ExtraPin = { name: string; point: GeoPoint };
+
+const KIND_LABEL: Record<Pin["kind"], string> = {
+  spot: "📷 景點",
+  meal: "🍽️ 用餐",
+  hotel: "🛏️ 住宿",
+};
 
 export function TripMap({
   trip,
   day,
   onDay,
-  onSpot,
+  onEntry,
 }: {
   trip: TripBook;
   day: TripDay;
   onDay: (id: string) => void;
-  onSpot: (index: number) => void;
+  onEntry: (entry: DayEntry) => void;
 }) {
   const host = useRef<HTMLDivElement>(null);
   const mapRef = useRef<LeafletMap | null>(null);
@@ -27,13 +43,10 @@ export function TripMap({
   const [active, setActive] = useState(0);
   const [pending, setPending] = useState(0);
   const [extras, setExtras] = useState<ExtraStop[]>([]);
-  const targets = useMemo(
-    () =>
-      day.spots.flatMap((spot, index) =>
-        canMap(spot.address || spot.name) ? [{ index, name: spot.name, query: mapQuery(spot.address || spot.name, day.city) }] : [],
-      ),
-    [day],
-  );
+  // Same source of truth as the day screen: the unified timeline
+  // (sights + meals + hotels, in chronological order). The map never
+  // reads day.spots directly, so it cannot drift from the daily route.
+  const targets = useMemo(() => mapEntryTargets(day), [day]);
 
   useEffect(() => {
     const load = () => setExtras(loadExtras(trip.id));
@@ -44,17 +57,23 @@ export function TripMap({
 
   useEffect(() => {
     let stop = false;
-    const bias = cityCenter(day.city);
     setActive(0);
     follow.current = true;
-    setPins(targets.map((item) => ({ index: item.index, name: item.name, point: null })));
-    setPending(targets.length);
+    setPins(targets.map((item) => ({ ...item, point: null })));
+    const mappable = targets.filter((item) => item.query);
+    setPending(mappable.length);
     void (async () => {
-      for (let i = 0; i < targets.length; i += 1) {
+      for (const target of mappable) {
         if (stop) return;
-        const point = await geocode(targets[i].query, bias);
+        // Per-entry bias: a Florence entry on a Milan-start day must be
+        // geocoded against Florence, or the bias guard rejects it.
+        const point = await geocode(target.query!, target.bias);
         if (stop) return;
-        setPins((current) => current.map((pin, pinIndex) => (pinIndex === i ? { ...pin, point } : pin)));
+        setPins((current) =>
+          current.map((pin) =>
+            pin.entry.kind === target.entry.kind && pin.entry.index === target.entry.index ? { ...pin, point } : pin,
+          ),
+        );
         setPending((count) => Math.max(0, count - 1));
       }
     })();
@@ -96,28 +115,40 @@ export function TripMap({
     const chosen = pins[active];
     void import("leaflet").then((L) => {
       layer.clearLayers();
-      const placed = pins.flatMap((pin) => (pin.point ? [pin] : []));
-      const extraPins: Pin[] = extras
+      const placed = pins.flatMap((pin, pinIndex) => (pin.point ? [{ pin, pinIndex }] : []));
+      const extraPins: ExtraPin[] = extras
         .filter((stop) => stop.dayId === day.id)
-        .map((stop) => ({ index: -1, name: stop.name, point: { lat: stop.lat, lng: stop.lng }, extra: true }));
-      const line = placed.map((pin) => [pin.point!.lat, pin.point!.lng] as [number, number]);
+        .map((stop) => ({ name: stop.name, point: { lat: stop.lat, lng: stop.lng } }));
+      // Route line through the day's placed entries in timeline order —
+      // the same order the daily route shows them.
+      const line = placed.map(({ pin }) => [pin.point!.lat, pin.point!.lng] as [number, number]);
       if (line.length > 1) L.polyline(line, { color: "#1e6f6f", weight: 4, opacity: 0.85 }).addTo(layer);
-      for (const pin of [...placed, ...extraPins]) {
+      for (const { pin, pinIndex } of placed) {
         if (!pin.point) continue;
-        const on = pin.index >= 0 && pin.index === chosen?.index;
+        const on = pinIndex === active;
         const marker = L.marker([pin.point.lat, pin.point.lng], {
           icon: L.divIcon({
-            className: pin.extra ? "map-pin extra" : on ? "map-pin on" : "map-pin",
-            html: `<span>${pin.extra ? "+" : pin.index + 1}</span>`,
+            className: `map-pin ${pin.kind}${on ? " on" : ""}`,
+            html: `<span>${pin.num}</span>`,
             iconSize: [32, 32],
             iconAnchor: [16, 16],
           }),
           zIndexOffset: on ? 500 : 0,
         });
         marker.on("click", () => {
-          if (pin.index < 0) return;
           follow.current = false;
-          setActive(pins.findIndex((item) => item.index === pin.index));
+          setActive(pinIndex);
+        });
+        marker.addTo(layer);
+      }
+      for (const extra of extraPins) {
+        const marker = L.marker([extra.point.lat, extra.point.lng], {
+          icon: L.divIcon({
+            className: "map-pin extra",
+            html: `<span>+</span>`,
+            iconSize: [32, 32],
+            iconAnchor: [16, 16],
+          }),
         });
         marker.addTo(layer);
       }
@@ -156,27 +187,27 @@ export function TripMap({
       </div>
       <div className="map-canvas" ref={host} />
       <div className="map-bar">
-        {pending ? <p className="tiny">定位緊 {pending} 個景點…</p> : null}
+        {pending ? <p className="tiny">定位緊 {pending} 個地點…</p> : null}
         {current ? (
           <div className="map-now">
             <strong>
-              {current.index + 1}. {current.name}
+              {current.num}. {current.name} <span>{KIND_LABEL[current.kind]}</span>
             </strong>
             <span>
-              {current.point ? null : <em>搵唔到位置</em>}
-              <button type="button" onClick={() => onSpot(current.index)}>
+              {current.point ? null : current.query ? <em>搵唔到位置</em> : <em>未有地點</em>}
+              <button type="button" onClick={() => onEntry(current.entry)}>
                 詳情
               </button>
             </span>
           </div>
         ) : (
-          <p className="tiny">{cityLabel(day.city) || "今日"}未有可以標示嘅景點。</p>
+          <p className="tiny">{cityLabel(day.city) || "今日"}未有可以標示嘅地點。</p>
         )}
         {pins.length > 1 ? (
           <div className="map-picks">
             {pins.map((pin, pinIndex) => (
               <button
-                key={pin.index}
+                key={`${pin.kind}-${pin.entry.index}`}
                 type="button"
                 className={pinIndex === active ? "on" : ""}
                 onClick={() => {
@@ -184,7 +215,7 @@ export function TripMap({
                   setActive(pinIndex);
                 }}
               >
-                {pin.index + 1}
+                {pin.num}
               </button>
             ))}
           </div>

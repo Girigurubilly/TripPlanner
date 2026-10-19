@@ -5,6 +5,8 @@ export type TripImage = {
   caption: string;
 };
 
+import { canMap, cityCenter, cityKeyFor, mapQuery } from "./geocode.ts";
+
 export type TripSpot = {
   /** Stable id, e.g. "dec18-sight-1". Synthesized at parse time when the JSON omits it. */
   id: string;
@@ -1721,4 +1723,121 @@ export async function downloadTrip(trip: TripBook): Promise<void> {
   link.download = named.name;
   link.click();
   URL.revokeObjectURL(url);
+}
+
+/** One row of a day's route as the day screen renders it: a ride leg, or a
+ *  timeline entry (sight / meal / hotel) with its timeline position number.
+ *  The map derives its pins from this same list, so the map and the daily
+ *  route can never drift apart. */
+export type PlanItem =
+  | { kind: "ride"; ride: Ride }
+  | { kind: "spot"; index: number; num: number }
+  | { kind: "meal"; index: number; num: number }
+  | { kind: "hotel"; index: number; num: number };
+
+export function planItems(day: TripDay): PlanItem[] {
+  if (day.timeline.length) {
+    // Unified timeline: entries render in timeline order; each entry's paired
+    // ride goes immediately before it. Transit (unpaired) rides slot in by
+    // rides[] order: before the next paired ride after them, or at the end
+    // (so return-to-hotel legs render last, after rideless entries).
+    const byId = new Map<string, DayEntry>();
+    day.spots.forEach((spot, index) => byId.set(spot.id, { kind: "spot", index }));
+    day.meals.forEach((meal, index) => byId.set(meal.id, { kind: "meal", index }));
+    day.hotels.forEach((hotel, index) => byId.set(hotel.id, { kind: "hotel", index }));
+    const rideFor = new Map<string, Ride>();
+    for (const ride of day.rides) {
+      if (ride.entry && byId.has(ride.entry) && !rideFor.has(ride.entry)) rideFor.set(ride.entry, ride);
+    }
+    const paired = new Set(rideFor.values());
+    const items: PlanItem[] = [];
+    const emitted = new Set<Ride>();
+    const emitRide = (ride: Ride) => {
+      if (emitted.has(ride)) return;
+      emitted.add(ride);
+      items.push({ kind: "ride", ride });
+    };
+    let cursor = 0;
+    day.timeline.forEach((entryId, position) => {
+      const entry = byId.get(entryId);
+      if (!entry) return;
+      const ride = rideFor.get(entryId);
+      if (ride) {
+        const stopAt = day.rides.indexOf(ride);
+        for (let i = cursor; i < stopAt; i++) {
+          const transit = day.rides[i];
+          if (transit && !paired.has(transit)) emitRide(transit);
+        }
+        cursor = Math.max(cursor, stopAt + 1);
+        emitRide(ride);
+      }
+      if (entry.kind === "spot") items.push({ kind: "spot", index: entry.index, num: position + 1 });
+      else if (entry.kind === "meal") items.push({ kind: "meal", index: entry.index, num: position + 1 });
+      else items.push({ kind: "hotel", index: entry.index, num: position + 1 });
+    });
+    // Leftovers: trailing transit rides plus any paired ride whose entry
+    // never appeared, in rides[] order. Nothing is dropped.
+    for (const ride of day.rides) emitRide(ride);
+    return items;
+  }
+  // Legacy days (no timeline): rides in order + the ride's spot, unplaced spots appended.
+  const items: PlanItem[] = [];
+  const placed = new Set<number>();
+  for (const ride of day.rides) {
+    items.push({ kind: "ride", ride });
+    if (ride.spot) {
+      const index = day.spots.findIndex(
+        (spot, spotIndex) => !placed.has(spotIndex) && spot.name === ride.spot,
+      );
+      if (index >= 0) {
+        placed.add(index);
+        items.push({ kind: "spot", index, num: index + 1 });
+      }
+    }
+  }
+  day.spots.forEach((_, index) => {
+    if (!placed.has(index)) items.push({ kind: "spot", index, num: index + 1 });
+  });
+  return items;
+}
+
+/** One mappable timeline entry for the map view. `query` is null when the
+ *  entry has no locatable place (generic / undecided / backup entries) —
+ *  the map still lists it, in timeline order, without a pin. No
+ *  coordinates are ever invented: an entry only gets a pin when the
+ *  geocoder resolves its real address/name. `bias` is the city centre
+ *  the geocoder is biased toward — the entry's own city on transfer
+ *  days, so a Florence entry on a Milan-start day is not rejected. */
+export type MapEntryTarget = {
+  entry: DayEntry;
+  num: number;
+  kind: "spot" | "meal" | "hotel";
+  name: string;
+  query: string | null;
+  bias: { lat: number; lng: number } | null;
+};
+
+export function mapEntryTargets(day: TripDay): MapEntryTarget[] {
+  return planItems(day).flatMap((item): MapEntryTarget[] => {
+    if (item.kind === "ride") return [];
+    const record =
+      item.kind === "spot" ? day.spots[item.index] : item.kind === "meal" ? day.meals[item.index] : day.hotels[item.index];
+    if (!record) return [];
+    // Meals are addressed by restaurant (`place`); sights/hotels by name.
+    // Prefer a street address when one is recorded.
+    const base =
+      item.kind === "meal" ? record.address || (record as TripMeal).place || record.name : record.address || record.name;
+    const name = item.kind === "meal" ? (record as TripMeal).place || record.name : record.name;
+    const cityKey = cityKeyFor(base, day.city);
+    return [
+      {
+        entry: { kind: item.kind, index: item.index },
+        num: item.num,
+        kind: item.kind,
+        name,
+        query: canMap(base) ? mapQuery(base, cityKey) : null,
+        bias: cityCenter(cityKey),
+      },
+    ];
+  });
 }
