@@ -6,6 +6,8 @@ export type TripImage = {
 };
 
 export type TripSpot = {
+  /** Stable id, e.g. "dec18-sight-1". Synthesized at parse time when the JSON omits it. */
+  id: string;
   name: string;
   badge: string;
   tone: string;
@@ -20,6 +22,29 @@ export type TripSpot = {
   refLabel: string;
   html: string;
 };
+
+/** A dining entry: café / bar / restaurant / meal. Same display fields as a
+ *  sight, plus slot/place/note. Meals live in day.meals, never in day.spots. */
+export type TripMeal = {
+  /** Stable id, e.g. "dec18-meal-1". Synthesized at parse time when the JSON omits it. */
+  id: string;
+  slot: string;
+  place: string;
+  note: string;
+  name: string;
+  badge: string;
+  tone: string;
+  hours: string;
+  address: string;
+  price: string;
+  image: string;
+  refLink: string;
+  refLabel: string;
+  html: string;
+};
+
+/** One entry on a day's unified timeline: a sight or a meal. */
+export type DayEntry = { kind: "spot"; index: number } | { kind: "meal"; index: number };
 
 export type TripSun = {
   sunrise: string;
@@ -38,10 +63,14 @@ export type TripDay = {
   foodHtml: string;
   noteHtml: string;
   sun: TripSun;
-  meals: { slot: string; place: string; note: string }[];
+  meals: TripMeal[];
   rides: Ride[];
   images: TripImage[];
   spots: TripSpot[];
+  /** Unified timeline: entry ids (spot ids + meal ids) in chronological order.
+   *  Empty = old-format day: the app renders the legacy way (spots timeline +
+   *  今日美食 box) instead of the unified timeline. */
+  timeline: string[];
 };
 
 export type RationalePoint = { label: string; text: string };
@@ -71,7 +100,11 @@ export type Ride = {
   detail: string;
   price: string;
   note: string;
+  /** Legacy destination entry NAME (spot or meal name). "" = transit ride. */
   spot: string;
+  /** Destination entry id (a spot id or a meal id). "" = transit ride.
+   *  Synthesized from `spot` at parse time when the JSON omits it. */
+  entry: string;
 };
 
 export type DayMeal = {
@@ -435,15 +468,84 @@ export function sunLine(day: TripDay): string {
   return [rise, set].filter(Boolean).join(" · ");
 }
 
-function parseMeals(value: unknown): { slot: string; place: string; note: string }[] {
+function parseEntryFields(item: Record<string, unknown>): Omit<TripSpot, "id"> {
+  const rawHtml = asString(item.html);
+  let name = asString(item.name).trim();
+  let badge = asString(item.badge).trim();
+  if ((!name || !badge) && typeof DOMParser !== "undefined" && rawHtml.includes("<summary")) {
+    const doc = new DOMParser().parseFromString(rawHtml, "text/html");
+    const summary = doc.querySelector("summary");
+    if (!name) name = summary?.querySelector(".spotname")?.textContent?.trim() || "";
+    if (!badge) badge = summary?.querySelector(".badge")?.textContent?.trim() || "";
+  }
+  const html = sanitizeHtml(rawHtml);
+  const facts = fillSpotFacts(html, {
+    hours: asString(item.hours).trim(),
+    address: asString(item.address).trim(),
+    price: asString(item.price).trim(),
+  });
+  return {
+    name,
+    badge,
+    tone: normalizeTone(asString(item.tone)),
+    hours: facts.hours,
+    address: facts.address,
+    price: facts.price,
+    image: asString(item.image).trim(),
+    refLink: asString(item.refLink).trim(),
+    refLabel: asString(item.refLabel).trim(),
+    html: facts.html,
+  };
+}
+
+function parseMeals(value: unknown, dayId: string): TripMeal[] {
   if (!Array.isArray(value)) return [];
+  let kept = 0;
   return value.flatMap((item) => {
     const row = (item || {}) as Record<string, unknown>;
     const place = asString(row.place).trim();
     const note = asString(row.note).trim();
     if (!place && !note) return [];
-    return [{ slot: asString(row.slot).trim(), place, note }];
+    kept += 1;
+    const entry = parseEntryFields(row);
+    return [
+      {
+        id: asString(row.id).trim() || `${dayId}-meal-${kept}`,
+        slot: asString(row.slot).trim(),
+        place,
+        note,
+        name: entry.name || place,
+        badge: entry.badge,
+        tone: entry.tone,
+        hours: entry.hours,
+        address: entry.address,
+        price: entry.price,
+        image: entry.image,
+        refLink: entry.refLink,
+        refLabel: entry.refLabel,
+        html: entry.html,
+      },
+    ];
   });
+}
+
+function parseTimeline(value: unknown, spots: TripSpot[], meals: TripMeal[]): string[] {
+  if (!Array.isArray(value)) return [];
+  const known = new Set([...spots.map((spot) => spot.id), ...meals.map((meal) => meal.id)]);
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const item of value) {
+    const entryId = asString(item).trim();
+    // Unknown id or duplicate: the timeline can't be trusted — fall back to the legacy render path.
+    if (!entryId || !known.has(entryId) || seen.has(entryId)) return [];
+    seen.add(entryId);
+    out.push(entryId);
+  }
+  // Defensive: append any entry the timeline forgot (new JSONs list every entry).
+  for (const entry of [...spots, ...meals]) {
+    if (!seen.has(entry.id)) out.push(entry.id);
+  }
+  return out;
 }
 
 function parseFoodPlaces(value: unknown): FoodPlace[] {
@@ -806,6 +908,7 @@ function parseRides(value: unknown): Ride[] {
         price: asString(row.price).trim(),
         note: asString(row.note).trim(),
         spot: asString(row.spot).trim(),
+        entry: asString(row.entry).trim(),
       },
     ];
   });
@@ -847,6 +950,7 @@ function ridesFromHtml(html: string, spots: TripSpot[]): Ride[] {
         price: "",
         note: more.join(" ").replace(/\s+/g, " ").trim(),
         spot: landed,
+        entry: "",
       },
     ];
   });
@@ -854,6 +958,30 @@ function ridesFromHtml(html: string, spots: TripSpot[]): Ride[] {
 
 function attachRides(days: TripDay[], blocks: { heading: string; html: string }[]): TripDay[] {
   return days.map((day) => {
+    if (day.timeline.length) {
+      // New-format day: ride.entry ids are authoritative. Resolve a legacy
+      // spot-name-only ride to its entry id, and clear stale names/ids so a
+      // meal is never fuzzy-matched onto a sight (or vice versa).
+      const byId = new Map<string, string>([
+        ...day.spots.map((spot) => [spot.id, spot.name] as [string, string]),
+        ...day.meals.map((meal) => [meal.id, meal.name] as [string, string]),
+      ]);
+      const byName = new Map<string, string>([
+        ...day.spots.map((spot) => [spot.name, spot.id] as [string, string]),
+        ...day.meals.map((meal) => [meal.name, meal.id] as [string, string]),
+      ]);
+      return {
+        ...day,
+        rides: day.rides.map((ride) => {
+          if (ride.entry) {
+            if (byId.has(ride.entry)) return { ...ride, spot: byId.get(ride.entry) || "" };
+            return { ...ride, entry: "", spot: "" };
+          }
+          if (ride.spot && byName.has(ride.spot)) return { ...ride, entry: byName.get(ride.spot) || "" };
+          return { ...ride, spot: "" };
+        }),
+      };
+    }
     if (day.rides.length) {
       return {
         ...day,
@@ -930,7 +1058,7 @@ function parseDay(value: unknown, index: number): TripDay {
   const id = asString(day.id).trim() || `day-${index + 1}`;
   const spotsRaw = Array.isArray(day.spots) ? day.spots : [];
   const imagesRaw = Array.isArray(day.images) ? day.images : [];
-  return {
+  const parsed: TripDay = {
     id,
     city: asString(day.city),
     label: asString(day.label, id),
@@ -940,7 +1068,7 @@ function parseDay(value: unknown, index: number): TripDay {
     foodHtml: sanitizeHtml(asString(day.foodHtml)),
     noteHtml: sanitizeHtml(asString(day.noteHtml)),
     sun: parseSun(day),
-    meals: parseMeals(day.meals),
+    meals: parseMeals(day.meals, id),
     rides: parseRides(day.rides),
     images: imagesRaw.map((image) => {
       const item = (image || {}) as Record<string, unknown>;
@@ -951,37 +1079,22 @@ function parseDay(value: unknown, index: number): TripDay {
         caption: cleanCredit(asString(item.caption)),
       };
     }),
-    spots: spotsRaw.map((spot) => {
-      const item = (spot || {}) as Record<string, unknown>;
-      const rawHtml = asString(item.html);
-      let name = asString(item.name).trim();
-      let badge = asString(item.badge).trim();
-      if ((!name || !badge) && typeof DOMParser !== "undefined" && rawHtml.includes("<summary")) {
-        const doc = new DOMParser().parseFromString(rawHtml, "text/html");
-        const summary = doc.querySelector("summary");
-        if (!name) name = summary?.querySelector(".spotname")?.textContent?.trim() || "";
-        if (!badge) badge = summary?.querySelector(".badge")?.textContent?.trim() || "";
-      }
-      const html = sanitizeHtml(rawHtml);
-      const facts = fillSpotFacts(html, {
-        hours: asString(item.hours).trim(),
-        address: asString(item.address).trim(),
-        price: asString(item.price).trim(),
+    spots: (() => {
+      let kept = 0;
+      return spotsRaw.map((spot) => {
+        const item = (spot || {}) as Record<string, unknown>;
+        kept += 1;
+        return {
+          id: asString(item.id).trim() || `${id}-sight-${kept}`,
+          ...parseEntryFields(item),
+        };
       });
-      return {
-        name,
-        badge,
-        tone: normalizeTone(asString(item.tone)),
-        hours: facts.hours,
-        address: facts.address,
-        price: facts.price,
-        image: asString(item.image).trim(),
-        refLink: asString(item.refLink).trim(),
-        refLabel: asString(item.refLabel).trim(),
-        html: facts.html,
-      };
-    }),
+    })(),
+    timeline: [],
   };
+  // Timeline is validated against the parsed entries (unknown id / duplicate -> legacy path).
+  parsed.timeline = parseTimeline(day.timeline, parsed.spots, parsed.meals);
+  return parsed;
 }
 
 export function parseTripBook(value: unknown): TripBook {
@@ -1103,6 +1216,12 @@ export type VisitMap = Record<string, Record<string, string>>;
 
 export function visitKey(dayId: string, index: number): string {
   return `${dayId}:${index}`;
+}
+
+/** Check-in key for a meal entry (distinct from spot keys, so existing
+ *  spot check-ins are preserved). */
+export function mealVisitKey(dayId: string, index: number): string {
+  return `${dayId}:meal-${index}`;
 }
 
 function readVisitMap(): VisitMap {
