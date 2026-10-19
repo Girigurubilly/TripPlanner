@@ -11,6 +11,7 @@ import {
   exportNotes,
   exportVisits,
   exportExtras,
+  exportWishes,
   loadTrips,
   localEditedAt,
   replaceLibrary,
@@ -19,6 +20,7 @@ import {
   type TripBook,
   type VisitMap,
   type ExtraMap,
+  type WishMap,
 } from "@/lib/trip";
 
 const PASS_KEY = "tripbook-drive-pass";
@@ -59,6 +61,7 @@ export type TripSnapshot = {
   checks?: CheckMap;
   visits?: VisitMap;
   extras?: ExtraMap;
+  wishes?: WishMap;
 };
 
 export type SyncResult = "pulled" | "pushed" | "ok" | "offline" | "need-auth" | "need-pass" | "missing" | "fail";
@@ -90,6 +93,7 @@ export function exportSnapshot(): TripSnapshot {
     checks: exportChecks(),
     visits: exportVisits(),
     extras: exportExtras(),
+    wishes: exportWishes(),
   };
 }
 
@@ -214,6 +218,7 @@ export async function syncTripDrive(): Promise<SyncResult> {
       decoded.checks,
       decoded.visits,
       decoded.extras,
+      decoded.wishes,
     );
     return "pulled";
   }

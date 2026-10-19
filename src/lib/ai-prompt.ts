@@ -120,3 +120,37 @@ export const AI_TRIP_PROMPT = [
   "  ]",
   "}",
 ].join("\n");
+
+const WISH_KIND: Record<string, string> = { sight: "景點", meal: "餐廳", souvenir: "手信店" };
+
+export function wishUpdatePrompt(
+  trip: { id: string; title: string },
+  wishes: { dayId: string; kind: string; name: string; note: string }[],
+  dayLabels: Record<string, string>,
+  book: unknown,
+): string {
+  const lines = wishes.map((wish) => {
+    const day = dayLabels[wish.dayId] || wish.dayId;
+    const kind = WISH_KIND[wish.kind] || wish.kind;
+    return `- ${day}｜${kind}｜${wish.name}${wish.note ? `｜${wish.note}` : ""}`;
+  });
+  return [
+    "你是資深旅行專家。下面是已經喺「行程」App 的行程，同我想加嘅地方。請出一份更新後嘅完整 JSON，用來覆蓋同一個行程。",
+    "",
+    "硬性規則：",
+    "1. 全程繁體中文。店名、地名可在後面括號附上原文。",
+    "2. 只輸出一個 JSON 程式碼區塊，前後不要加解說。schemaVersion 必須是數字 1。id 必須維持「" + trip.id + "」，title 維持「" + trip.title + "」。",
+    "3. 保留所有現有日子、景點、餐廳、酒店、交通同指南。只加入下面列出嘅新地方，並寫好詳情。",
+    "4. 景點加進該日 spots，欄位有 name、badge、tone、hours、address、price、html。如果該日 timeline 已經有 id，就把新景點 id 插喺當日合適位置。",
+    "5. 餐廳加進該日 meals，欄位有 slot、name、place、note、hours、address、price、html。place 必須同 name 完全一樣。同時加進 id 為 food 的 guide.places。",
+    "6. 手信店加進 id 為 souvenir 的 guide，放喺該日城市的 <h2> 下面。不要變成景點，除非備註寫明要排進行程。",
+    "7. hours、address、price 用純文字。不確定就寫「出發前再核對」，不要編造確實票價、營業時間或網址。image 留空字串，不要新增 images。",
+    "8. html 只用 <p> 或 <ul><li> 寫簡介同注意。禁止 script、iframe、style、on* 屬性。",
+    "",
+    "想加的地方：",
+    ...lines,
+    "",
+    "現有行程 JSON：",
+    JSON.stringify(book),
+  ].join("\n");
+}

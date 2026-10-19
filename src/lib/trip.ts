@@ -1372,6 +1372,84 @@ export function replaceExtras(extras: ExtraMap): void {
   localStorage.setItem(EXTRAS_KEY, JSON.stringify(extras));
 }
 
+export type WishKind = "sight" | "meal" | "souvenir";
+
+export type WishPlace = {
+  id: string;
+  dayId: string;
+  kind: WishKind;
+  name: string;
+  note: string;
+};
+
+export type WishMap = Record<string, WishPlace[]>;
+
+const WISHES_KEY = "tripwishes.v1";
+
+function asWish(value: unknown): WishPlace | null {
+  if (!value || typeof value !== "object") return null;
+  const raw = value as Record<string, unknown>;
+  const name = asString(raw.name).trim();
+  const dayId = asString(raw.dayId).trim();
+  const kind = asString(raw.kind);
+  if (!name || !dayId || (kind !== "sight" && kind !== "meal" && kind !== "souvenir")) return null;
+  return {
+    id: asString(raw.id).trim() || `wish-${Date.now().toString(36)}`,
+    dayId,
+    kind,
+    name: name.slice(0, 80),
+    note: asString(raw.note).trim().slice(0, 160),
+  };
+}
+
+function readWishMap(): WishMap {
+  try {
+    const raw = localStorage.getItem(WISHES_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    if (!parsed || typeof parsed !== "object") return {};
+    const map: WishMap = {};
+    for (const [tripId, rows] of Object.entries(parsed)) {
+      if (!Array.isArray(rows)) continue;
+      map[tripId] = rows.flatMap((row) => {
+        const wish = asWish(row);
+        return wish ? [wish] : [];
+      });
+    }
+    return map;
+  } catch {
+    return {};
+  }
+}
+
+export function loadWishes(tripId: string): WishPlace[] {
+  return readWishMap()[tripId] || [];
+}
+
+export function addWish(tripId: string, wish: Omit<WishPlace, "id">): WishPlace {
+  const all = readWishMap();
+  const next: WishPlace = { ...wish, id: `wish-${Date.now().toString(36)}`, name: wish.name.trim().slice(0, 80), note: wish.note.trim().slice(0, 160) };
+  all[tripId] = [...(all[tripId] || []), next];
+  localStorage.setItem(WISHES_KEY, JSON.stringify(all));
+  touchLocalEdit();
+  return next;
+}
+
+export function removeWish(tripId: string, id: string): void {
+  const all = readWishMap();
+  all[tripId] = (all[tripId] || []).filter((wish) => wish.id !== id);
+  localStorage.setItem(WISHES_KEY, JSON.stringify(all));
+  touchLocalEdit();
+}
+
+export function exportWishes(): WishMap {
+  return readWishMap();
+}
+
+export function replaceWishes(wishes: WishMap): void {
+  localStorage.setItem(WISHES_KEY, JSON.stringify(wishes));
+}
+
 export type CheckMap = Record<string, Record<string, boolean>>;
 
 const CHECKS_KEY = "tripchecks.v1";
@@ -1475,6 +1553,11 @@ export function deleteTrip(current: TripBook[], id: string): TripBook[] {
     delete extras[id];
     localStorage.setItem(EXTRAS_KEY, JSON.stringify(extras));
   }
+  const wishes = readWishMap();
+  if (wishes[id]) {
+    delete wishes[id];
+    localStorage.setItem(WISHES_KEY, JSON.stringify(wishes));
+  }
   return trips;
 }
 
@@ -1500,12 +1583,14 @@ export function replaceLibrary(
   checks?: CheckMap,
   visits?: VisitMap,
   extras?: ExtraMap,
+  wishes?: WishMap,
 ): void {
   saveTrips(trips, { silent: true });
   localStorage.setItem(NOTES_KEY, JSON.stringify(notes));
   if (checks) replaceChecks(checks);
   if (visits) replaceVisits(visits);
   if (extras) replaceExtras(extras);
+  if (wishes) replaceWishes(wishes);
   touchLocalEdit(editedAt);
 }
 

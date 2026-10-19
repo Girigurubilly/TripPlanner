@@ -50,10 +50,14 @@ import {
   writeCheck,
   writeVisit,
   addExtra,
+  addWish,
   loadExtras,
+  loadWishes,
   removeExtra,
+  removeWish,
   type DayEntry,
   type ExtraStop,
+  type WishKind,
   type TripBook,
   type TripSpot,
   type TripDay,
@@ -62,7 +66,7 @@ import {
 } from "@/lib/trip";
 import { DrivePanel } from "@/components/drive-panel";
 import { syncTripDriveIfDue } from "@/lib/drive-sync";
-import { AI_TRIP_PROMPT } from "@/lib/ai-prompt";
+import { AI_TRIP_PROMPT, wishUpdatePrompt } from "@/lib/ai-prompt";
 import { dayIdForDate, loadMoneyLinks, moneyLinkBackUrl, moneySpendUrl, moneyTripIdForBook, rankTripBooks, readMoneyRef, rememberMoneyRef, saveMoneyLink, spendItem, type MoneyTripRef } from "@/lib/money-link";
 import { startLocate, type PlaceFix } from "@/lib/geo";
 
@@ -1938,6 +1942,7 @@ function DayScreen({
           <Html html={day.noteHtml} />
         </div>
       ) : null}
+      <WishPlaces trip={trip} day={day} />
       <ExtraStops tripId={trip.id} dayId={day.id} />
       {rationale ? (
         <section className="why">
@@ -2369,6 +2374,109 @@ function DayNav({
         <ChevronRight size={18} aria-hidden="true" />
       </button>
     </nav>
+  );
+}
+
+function WishPlaces({ trip, day }: { trip: TripBook; day: TripDay }) {
+  const [rows, setRows] = useState(loadWishes(trip.id));
+  const [kind, setKind] = useState<WishKind>("sight");
+  const [name, setName] = useState("");
+  const [note, setNote] = useState("");
+  const [fallback, setFallback] = useState("");
+  const [copied, setCopied] = useState(false);
+  const dayRows = rows.filter((row) => row.dayId === day.id);
+
+  useEffect(() => {
+    const load = () => setRows(loadWishes(trip.id));
+    load();
+    window.addEventListener("trip-wishes", load);
+    return () => window.removeEventListener("trip-wishes", load);
+  }, [trip.id]);
+
+  function refresh() {
+    window.dispatchEvent(new Event("trip-wishes"));
+  }
+
+  async function copyForAi() {
+    const wishes = loadWishes(trip.id);
+    const labels = Object.fromEntries(trip.days.map((item) => [item.id, `${item.label} ${item.title}`.trim()]));
+    const text = wishUpdatePrompt(trip, wishes, labels, trip);
+    try {
+      await navigator.clipboard.writeText(text);
+      setFallback("");
+      setCopied(true);
+    } catch {
+      setCopied(false);
+      setFallback(text);
+    }
+  }
+
+  return (
+    <div className="extras">
+      <h2 className="section-label">想加的地方</h2>
+      <p className="tiny">先記低景點、餐廳或手信店。複製俾 AI 之後，佢會出一份同一個行程的 JSON，再上傳就會更新。</p>
+      <div className="wish-kinds">
+        {(
+          [
+            ["sight", "景點"],
+            ["meal", "餐廳"],
+            ["souvenir", "手信"],
+          ] as const
+        ).map(([value, label]) => (
+          <button key={value} className={kind === value ? "stamp on" : "stamp"} type="button" onClick={() => setKind(value)}>
+            {label}
+          </button>
+        ))}
+      </div>
+      <form
+        className="here"
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (!name.trim()) return;
+          addWish(trip.id, { dayId: day.id, kind, name, note });
+          setName("");
+          setNote("");
+          setCopied(false);
+          refresh();
+        }}
+      >
+        <input value={name} placeholder="店名或景點" aria-label="店名或景點" onChange={(event) => setName(event.target.value)} />
+        <input value={note} placeholder="可選：點解要去、附近邊度" aria-label="備註" onChange={(event) => setNote(event.target.value)} />
+        <button className="btn primary" type="submit" disabled={!name.trim()}>
+          加入呢日
+        </button>
+      </form>
+      {dayRows.length ? (
+        <div className="sheet">
+          {dayRows.map((row) => (
+            <div className="extra-row" key={row.id}>
+              <strong>
+                {row.kind === "meal" ? "餐廳" : row.kind === "souvenir" ? "手信" : "景點"} · {row.name}
+              </strong>
+              {row.note ? <span className="pill-hint">{row.note}</span> : null}
+              <span className="extra-actions">
+                <button
+                  className="stamp"
+                  type="button"
+                  onClick={() => {
+                    removeWish(trip.id, row.id);
+                    refresh();
+                  }}
+                >
+                  刪除
+                </button>
+              </span>
+            </div>
+          ))}
+        </div>
+      ) : null}
+      {rows.length ? (
+        <button className="btn primary" type="button" onClick={() => void copyForAi()}>
+          {copied ? "已複製，貼去 Grok 或 Muse" : `複製 ${rows.length} 項俾 AI 更新`}
+        </button>
+      ) : null}
+      {fallback ? <textarea className="prompt-box" readOnly value={fallback} /> : null}
+    </div>
   );
 }
 

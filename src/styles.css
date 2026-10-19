@@ -153,6 +153,15 @@
   width: 100%;
   margin: 12px 0 4px;
 }
+.wish-kinds {
+  display: flex;
+  gap: 8px;
+  margin: 8px 0;
+}
+.wish-kinds .stamp {
+  border: 0;
+  cursor: pointer;
+}
 .money-spot {
   display: inline-flex;
   align-items: center;
