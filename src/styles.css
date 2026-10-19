@@ -1116,6 +1116,32 @@ figure.refimg img {
 .stop.done .stop-num {
   background: var(--teal);
 }
+/* Dining entries on the unified timeline: visually distinct from sights —
+   warm tint + dashed border, so 🍽️ 用餐 never reads as a 📷 景點. */
+.stop.meal .stop-num {
+  background: #b45309;
+}
+.stop.meal.done .stop-num {
+  background: var(--teal);
+}
+.stop.meal .stop-card {
+  background: #fffaf3;
+  border-color: #e8c99a;
+  border-style: dashed;
+}
+.stop.meal .stop-card:active {
+  background: #fdf0dd;
+}
+.kind-chip {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--muted);
+}
+.stop.meal .kind-chip {
+  color: #92400e;
+}
 .stop-card {
   display: grid;
   grid-template-columns: 64px minmax(0, 1fr) auto;
@@ -1668,6 +1694,10 @@ dl.facts dd {
 .badge.na {
   background: var(--na-bg);
   color: var(--muted);
+}
+.badge.meal {
+  background: #fdeeda;
+  color: #92400e;
 }
 .maplink {
   display: inline-block;
