@@ -63,7 +63,7 @@ import {
 import { DrivePanel } from "@/components/drive-panel";
 import { syncTripDriveIfDue } from "@/lib/drive-sync";
 import { AI_TRIP_PROMPT } from "@/lib/ai-prompt";
-import { loadMoneyLinks, moneyLinkBackUrl, moneySpendUrl, moneyTripIdForBook, rankTripBooks, readMoneyRef, rememberMoneyRef, saveMoneyLink, spendItem, type MoneyTripRef } from "@/lib/money-link";
+import { dayIdForDate, loadMoneyLinks, moneyLinkBackUrl, moneySpendUrl, moneyTripIdForBook, rankTripBooks, readMoneyRef, rememberMoneyRef, saveMoneyLink, spendItem, type MoneyTripRef } from "@/lib/money-link";
 import { startLocate, type PlaceFix } from "@/lib/geo";
 
 const TAB_ICON: Record<string, LucideIcon> = {
@@ -260,6 +260,11 @@ function searchTrip(trip: TripBook, query: string): SearchHit[] {
   return hits.slice(0, 40);
 }
 
+function focusDay(trip: TripBook, iso: string): { tab: string; dayId: string } {
+  const dayId = dayIdForDate(trip, iso) || todayDay(trip)?.id || trip.days[0]?.id || "";
+  return { tab: dayId ? "days" : "", dayId };
+}
+
 export function TripApp() {
   const [ready, setReady] = useState(false);
   const [trips, setTrips] = useState<TripBook[]>([]);
@@ -287,7 +292,7 @@ export function TripApp() {
       setMoneyAsk(money);
       setStatus("揀邊一個行程書係呢趟。揀完會寫返理財 App。");
       const url = new URL(window.location.href);
-      for (const key of ["money", "start", "end", "name", "dest", "book", "pick"]) url.searchParams.delete(key);
+      for (const key of ["money", "start", "end", "name", "dest", "book", "pick", "day"]) url.searchParams.delete(key);
       window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
     } else if (money) {
       rememberMoneyRef(money);
@@ -295,17 +300,17 @@ export function TripApp() {
       if (ranked.best) {
         saveMoneyLink(money.id, ranked.best.id);
         rememberMoneyRef({ ...money, book: ranked.best.id });
-        const today = todayDay(ranked.best);
+        const opened = focusDay(ranked.best, money.day);
         setOpenId(ranked.best.id);
-        setTab(today ? "days" : "");
-        setDayId(today?.id || ranked.best.days[0]?.id || "");
+        setTab(opened.tab);
+        setDayId(opened.dayId);
         setStatus(`已打開同「${money.name || money.dest || "呢趟"}」同一趟。`);
       } else {
         setMoneyAsk(money);
         setStatus(stored.length ? "揀邊一個行程書係呢趟。" : "呢部機未有行程。上傳之後再配對。");
       }
       const url = new URL(window.location.href);
-      for (const key of ["money", "start", "end", "name", "dest", "book", "pick"]) url.searchParams.delete(key);
+      for (const key of ["money", "start", "end", "name", "dest", "book", "pick", "day"]) url.searchParams.delete(key);
       window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
     } else if (!returning && live) {
       setOpenId(live.id);
@@ -476,10 +481,10 @@ export function TripApp() {
                               return;
                             }
                             setMoneyAsk(null);
-                            const today = todayDay(trip);
+                            const opened = focusDay(trip, moneyAsk.day);
                             setOpenId(trip.id);
-                            setTab(today ? "days" : "");
-                            setDayId(today?.id || trip.days[0]?.id || "");
+                            setTab(opened.tab);
+                            setDayId(opened.dayId);
                             setStatus(`已配對「${trip.title}」。`);
                           }
                         : undefined

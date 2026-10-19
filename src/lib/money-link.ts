@@ -12,6 +12,7 @@ export type MoneyTripRef = {
   end: string;
   book: string;
   pick: boolean;
+  day: string;
 };
 
 export type SpendItem = {
@@ -33,6 +34,7 @@ export function readMoneyRef(search: string): MoneyTripRef | null {
     end: (q.get("end") || "").slice(0, 10),
     book: (q.get("book") || "").slice(0, 80),
     pick: q.get("pick") === "1",
+    day: /^\d{4}-\d{2}-\d{2}$/.test(q.get("day") || "") ? q.get("day") || "" : "",
   };
 }
 
@@ -138,6 +140,13 @@ export function parsePrice(raw: string): { amount: number; currency: string } | 
   const amount = Number(num[1]);
   if (!Number.isFinite(amount) || amount <= 0) return null;
   return { amount, currency };
+}
+
+export function dayIdForDate(trip: TripBook, iso: string): string {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return "";
+  const dates = dayDates(trip);
+  const index = dates.findIndex((date) => date instanceof Date && isoDate(date) === iso);
+  return index >= 0 ? trip.days[index]?.id || "" : "";
 }
 
 export function spendItem(trip: TripBook, day: TripDay, label: string, price: string): SpendItem | null {
