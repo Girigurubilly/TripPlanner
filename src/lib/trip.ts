@@ -43,8 +43,16 @@ export type TripMeal = {
   html: string;
 };
 
-/** One entry on a day's unified timeline: a sight or a meal. */
-export type DayEntry = { kind: "spot"; index: number } | { kind: "meal"; index: number };
+/** A stay entry: one hotel per day (night's hotel, or checkout on the last
+ *  day). Same display fields as a sight. Hotels live in day.hotels, never
+ *  in day.spots or day.meals. */
+export type TripHotel = TripSpot;
+
+/** One entry on a day's unified timeline: a sight, a meal, or a stay. */
+export type DayEntry =
+  | { kind: "spot"; index: number }
+  | { kind: "meal"; index: number }
+  | { kind: "hotel"; index: number };
 
 export type TripSun = {
   sunrise: string;
@@ -64,10 +72,12 @@ export type TripDay = {
   noteHtml: string;
   sun: TripSun;
   meals: TripMeal[];
+  hotels: TripHotel[];
   rides: Ride[];
   images: TripImage[];
   spots: TripSpot[];
-  /** Unified timeline: entry ids (spot ids + meal ids) in chronological order.
+  /** Unified timeline: entry ids (spot ids + meal ids + hotel ids) in
+   *  chronological order.
    *  Empty = old-format day: the app renders the legacy way (spots timeline +
    *  今日美食 box) instead of the unified timeline. */
   timeline: string[];
@@ -529,9 +539,25 @@ function parseMeals(value: unknown, dayId: string): TripMeal[] {
   });
 }
 
-function parseTimeline(value: unknown, spots: TripSpot[], meals: TripMeal[]): string[] {
+function parseHotels(value: unknown, dayId: string): TripHotel[] {
   if (!Array.isArray(value)) return [];
-  const known = new Set([...spots.map((spot) => spot.id), ...meals.map((meal) => meal.id)]);
+  let kept = 0;
+  return value.flatMap((item) => {
+    const row = (item || {}) as Record<string, unknown>;
+    const entry = parseEntryFields(row);
+    if (!entry.name) return [];
+    kept += 1;
+    return [{ id: asString(row.id).trim() || `${dayId}-hotel-${kept}`, ...entry }];
+  });
+}
+
+function parseTimeline(value: unknown, spots: TripSpot[], meals: TripMeal[], hotels: TripHotel[]): string[] {
+  if (!Array.isArray(value)) return [];
+  const known = new Set([
+    ...spots.map((spot) => spot.id),
+    ...meals.map((meal) => meal.id),
+    ...hotels.map((hotel) => hotel.id),
+  ]);
   const seen = new Set<string>();
   const out: string[] = [];
   for (const item of value) {
@@ -542,7 +568,7 @@ function parseTimeline(value: unknown, spots: TripSpot[], meals: TripMeal[]): st
     out.push(entryId);
   }
   // Defensive: append any entry the timeline forgot (new JSONs list every entry).
-  for (const entry of [...spots, ...meals]) {
+  for (const entry of [...spots, ...meals, ...hotels]) {
     if (!seen.has(entry.id)) out.push(entry.id);
   }
   return out;
@@ -965,10 +991,12 @@ function attachRides(days: TripDay[], blocks: { heading: string; html: string }[
       const byId = new Map<string, string>([
         ...day.spots.map((spot) => [spot.id, spot.name] as [string, string]),
         ...day.meals.map((meal) => [meal.id, meal.name] as [string, string]),
+        ...day.hotels.map((hotel) => [hotel.id, hotel.name] as [string, string]),
       ]);
       const byName = new Map<string, string>([
         ...day.spots.map((spot) => [spot.name, spot.id] as [string, string]),
         ...day.meals.map((meal) => [meal.name, meal.id] as [string, string]),
+        ...day.hotels.map((hotel) => [hotel.name, hotel.id] as [string, string]),
       ]);
       return {
         ...day,
@@ -1069,6 +1097,7 @@ function parseDay(value: unknown, index: number): TripDay {
     noteHtml: sanitizeHtml(asString(day.noteHtml)),
     sun: parseSun(day),
     meals: parseMeals(day.meals, id),
+    hotels: parseHotels(day.hotels, id),
     rides: parseRides(day.rides),
     images: imagesRaw.map((image) => {
       const item = (image || {}) as Record<string, unknown>;
@@ -1093,7 +1122,7 @@ function parseDay(value: unknown, index: number): TripDay {
     timeline: [],
   };
   // Timeline is validated against the parsed entries (unknown id / duplicate -> legacy path).
-  parsed.timeline = parseTimeline(day.timeline, parsed.spots, parsed.meals);
+  parsed.timeline = parseTimeline(day.timeline, parsed.spots, parsed.meals, parsed.hotels);
   return parsed;
 }
 
@@ -1222,6 +1251,11 @@ export function visitKey(dayId: string, index: number): string {
  *  spot check-ins are preserved). */
 export function mealVisitKey(dayId: string, index: number): string {
   return `${dayId}:meal-${index}`;
+}
+
+/** Check-in key for a hotel entry (distinct from spot/meal keys). */
+export function hotelVisitKey(dayId: string, index: number): string {
+  return `${dayId}:hotel-${index}`;
 }
 
 function readVisitMap(): VisitMap {

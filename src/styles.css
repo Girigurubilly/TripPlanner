@@ -1145,6 +1145,23 @@ figure.refimg img {
 .stop.meal .stop-card:active {
   background: #fdf0dd;
 }
+/* Stay entries on the unified timeline: visually distinct from sights and
+   meals — cool teal tint + dashed border, so 🛏️ 住宿 never reads as a
+   📷 景點 or a 🍽️ 用餐. */
+.stop.hotel .stop-num {
+  background: #0f766e;
+}
+.stop.hotel.done .stop-num {
+  background: var(--teal);
+}
+.stop.hotel .stop-card {
+  background: #f0fdfa;
+  border-color: #99f6e4;
+  border-style: dashed;
+}
+.stop.hotel .stop-card:active {
+  background: #ccfbf1;
+}
 .kind-chip {
   display: block;
   margin-top: 2px;
@@ -1154,6 +1171,9 @@ figure.refimg img {
 }
 .stop.meal .kind-chip {
   color: #92400e;
+}
+.stop.hotel .kind-chip {
+  color: #0f766e;
 }
 .stop-card {
   display: grid;
@@ -1711,6 +1731,10 @@ dl.facts dd {
 .badge.meal {
   background: #fdeeda;
   color: #92400e;
+}
+.badge.hotel {
+  background: #ccfbf1;
+  color: #0f766e;
 }
 .maplink {
   display: inline-block;

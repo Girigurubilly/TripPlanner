@@ -46,6 +46,7 @@ import {
   upsertTrips,
   visitKey,
   mealVisitKey,
+  hotelVisitKey,
   writeCheck,
   writeVisit,
   addExtra,
@@ -229,7 +230,7 @@ function plainText(html: string): string {
   return html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
 }
 
-type SearchHit = { dayId: string; kind: "day" | "spot" | "meal"; index: number; title: string; meta: string };
+type SearchHit = { dayId: string; kind: "day" | "spot" | "meal" | "hotel"; index: number; title: string; meta: string };
 
 function searchTrip(trip: TripBook, query: string): SearchHit[] {
   const needle = query.trim().toLowerCase();
@@ -248,6 +249,11 @@ function searchTrip(trip: TripBook, query: string): SearchHit[] {
       const blob = `${meal.name} ${meal.place} ${meal.slot} ${meal.note} ${meal.hours} ${meal.address} ${meal.price} ${plainText(meal.html)}`.toLowerCase();
       if (!blob.includes(needle)) return;
       hits.push({ dayId: day.id, kind: "meal", index, title: meal.name, meta: `${day.label}${meal.slot ? ` · ${meal.slot}` : ""} · 🍽️ 用餐` });
+    });
+    day.hotels.forEach((hotel, index) => {
+      const blob = `${hotel.name} ${hotel.badge} ${hotel.hours} ${hotel.address} ${hotel.price} ${plainText(hotel.html)}`.toLowerCase();
+      if (!blob.includes(needle)) return;
+      hits.push({ dayId: day.id, kind: "hotel", index, title: hotel.name, meta: `${day.label} · 🛏️ 住宿` });
     });
   }
   hits.sort((a, b) => Number(!(a.kind !== "day" && a.title.toLowerCase().includes(needle))) - Number(!(b.kind !== "day" && b.title.toLowerCase().includes(needle))));
@@ -756,12 +762,15 @@ function Book({
   const hits = useMemo(() => (searching ? searchTrip(trip, query) : []), [searching, trip, query]);
   const entrySpot = activeDay && entryAt?.kind === "spot" ? activeDay.spots[entryAt.index] : undefined;
   const entryMeal = activeDay && entryAt?.kind === "meal" ? activeDay.meals[entryAt.index] : undefined;
-  const detailItem = entrySpot || entryMeal;
+  const entryHotel = activeDay && entryAt?.kind === "hotel" ? activeDay.hotels[entryAt.index] : undefined;
+  const detailItem = entrySpot || entryMeal || entryHotel;
   const detailKey =
     activeDay && entryAt
       ? entryAt.kind === "meal"
         ? mealVisitKey(activeDay.id, entryAt.index)
-        : visitKey(activeDay.id, entryAt.index)
+        : entryAt.kind === "hotel"
+          ? hotelVisitKey(activeDay.id, entryAt.index)
+          : visitKey(activeDay.id, entryAt.index)
       : "";
   const spotView = useMemo(() => (detailItem ? presentSpot(detailItem) : null), [detailItem]);
   let screenTitle = trip.title;
@@ -866,6 +875,7 @@ function Book({
         {!searching && detailItem && activeDay ? (
           <article className="screen reading">
             {entryMeal ? <p className="spot-badge-row"><span className="badge meal">🍽️ 用餐{entryMeal.slot ? ` · ${entryMeal.slot}` : ""}</span></p> : null}
+            {entryHotel ? <p className="spot-badge-row"><span className="badge hotel">🛏️ 住宿</span></p> : null}
             {detailItem.badge ? <p className="spot-badge-row"><span className={`badge ${detailItem.tone}`}>{detailItem.badge}</span></p> : null}
             {mapLink(detailItem) ? (
               <a className="btn primary nav-go" href={mapLink(detailItem)} target="_blank" rel="noopener">
@@ -959,6 +969,10 @@ function Book({
             }}
             onMeal={(index) => {
               setEntryAt({ kind: "meal", index });
+              window.scrollTo({ top: 0 });
+            }}
+            onHotel={(index) => {
+              setEntryAt({ kind: "hotel", index });
               window.scrollTo({ top: 0 });
             }}
             onMap={() => onTab("map")}
@@ -1613,6 +1627,7 @@ function DayScreen({
   onDay,
   onSpot,
   onMeal,
+  onHotel,
   onMap,
 }: {
   trip: TripBook;
@@ -1621,6 +1636,7 @@ function DayScreen({
   onDay: (id: string) => void;
   onSpot: (index: number) => void;
   onMeal: (index: number) => void;
+  onHotel: (index: number) => void;
   onMap: () => void;
 }) {
   const index = trip.days.findIndex((item) => item.id === day.id);
@@ -1634,13 +1650,15 @@ function DayScreen({
   const chipRef = useRef<HTMLDivElement>(null);
   const readRef = useRef<HTMLDivElement>(null);
   // Unified-timeline days count check-ins over every timeline entry (sights +
-  // meals); legacy days count sights only, as before.
+  // meals + hotels); legacy days count sights only, as before.
   const seen = day.timeline.length
     ? day.timeline.filter((entryId) => {
         const spotIndex = day.spots.findIndex((spot) => spot.id === entryId);
         if (spotIndex >= 0) return Boolean(visits[visitKey(day.id, spotIndex)]);
         const mealIndex = day.meals.findIndex((meal) => meal.id === entryId);
-        return mealIndex >= 0 && Boolean(visits[mealVisitKey(day.id, mealIndex)]);
+        if (mealIndex >= 0) return Boolean(visits[mealVisitKey(day.id, mealIndex)]);
+        const hotelIndex = day.hotels.findIndex((hotel) => hotel.id === entryId);
+        return hotelIndex >= 0 && Boolean(visits[hotelVisitKey(day.id, hotelIndex)]);
       }).length
     : day.spots.filter((_, spotIndex) => visits[visitKey(day.id, spotIndex)]).length;
   const totalEntries = day.timeline.length || day.spots.length;
@@ -1764,6 +1782,11 @@ function DayScreen({
                           onMeal(mealIndex);
                           return;
                         }
+                        const hotelIndex = day.hotels.findIndex((hotel) => hotel.id === entryId);
+                        if (hotelIndex >= 0) {
+                          onHotel(hotelIndex);
+                          return;
+                        }
                       }
                       // Legacy fallback: pair by destination name.
                       const spotIndex = day.spots.findIndex((spot) => spot.name === ride.spot);
@@ -1803,6 +1826,45 @@ function DayScreen({
                         onClick={(event) => {
                           event.stopPropagation();
                           toggleVisit(trip.id, mealVisitKey(day.id, mealIndex), at);
+                        }}
+                      >
+                        {at ? "已去" : "打卡"}
+                      </button>
+                    </div>
+                  </article>
+                );
+              }
+              if (item.kind === "hotel") {
+                const hotelIndex = item.index;
+                const hotelItem = day.hotels[hotelIndex];
+                const at = visits[hotelVisitKey(day.id, hotelIndex)] || "";
+                return (
+                  <article className={at ? "stop hotel done" : "stop hotel"} key={`hotel-${hotelItem.id}`}>
+                    <span className="stop-num">{item.num}</span>
+                    <div className="stop-card" onClick={() => onHotel(hotelIndex)} role="link">
+                      {hotelItem.image ? (
+                        <img className="stop-thumb" src={hotelItem.image} alt="" loading="lazy" />
+                      ) : (
+                        <span className="stop-thumb empty" aria-hidden="true">🛏️</span>
+                      )}
+                      <span className="stop-copy">
+                        <strong>
+                          {hotelItem.name}
+                          {hotelItem.badge ? <em>{hotelItem.badge}</em> : null}
+                        </strong>
+                        <small className="kind-chip">🛏️ 住宿</small>
+                        {hotelItem.address || hotelItem.price ? (
+                          <small>{[hotelItem.address, hotelItem.price].filter(Boolean).join(" · ")}</small>
+                        ) : null}
+                        {at ? <span className="pill-hint">{visitClock(at)} 已去</span> : null}
+                      </span>
+                      <button
+                        className={at ? "stamp on" : "stamp"}
+                        type="button"
+                        aria-label={at ? "取消打卡" : "打卡"}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          toggleVisit(trip.id, hotelVisitKey(day.id, hotelIndex), at);
                         }}
                       >
                         {at ? "已去" : "打卡"}
@@ -1900,7 +1962,8 @@ function DayScreen({
 type PlanItem =
   | { kind: "ride"; ride: Ride }
   | { kind: "spot"; index: number; num: number }
-  | { kind: "meal"; index: number; num: number };
+  | { kind: "meal"; index: number; num: number }
+  | { kind: "hotel"; index: number; num: number };
 
 function planItems(day: TripDay): PlanItem[] {
   if (day.timeline.length) {
@@ -1911,6 +1974,7 @@ function planItems(day: TripDay): PlanItem[] {
     const byId = new Map<string, DayEntry>();
     day.spots.forEach((spot, index) => byId.set(spot.id, { kind: "spot", index }));
     day.meals.forEach((meal, index) => byId.set(meal.id, { kind: "meal", index }));
+    day.hotels.forEach((hotel, index) => byId.set(hotel.id, { kind: "hotel", index }));
     const rideFor = new Map<string, Ride>();
     for (const ride of day.rides) {
       if (ride.entry && byId.has(ride.entry) && !rideFor.has(ride.entry)) rideFor.set(ride.entry, ride);
@@ -1938,7 +2002,8 @@ function planItems(day: TripDay): PlanItem[] {
         emitRide(ride);
       }
       if (entry.kind === "spot") items.push({ kind: "spot", index: entry.index, num: position + 1 });
-      else items.push({ kind: "meal", index: entry.index, num: position + 1 });
+      else if (entry.kind === "meal") items.push({ kind: "meal", index: entry.index, num: position + 1 });
+      else items.push({ kind: "hotel", index: entry.index, num: position + 1 });
     });
     // Leftovers: trailing transit rides plus any paired ride whose entry
     // never appeared, in rides[] order. Nothing is dropped.
