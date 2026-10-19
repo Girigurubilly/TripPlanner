@@ -145,9 +145,13 @@
   border-color: var(--accent);
 }
 .btn.primary {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #fff;
+  background: var(--accent, #9a3412);
+  color: white;
+  border-color: transparent;
+}
+.money-send {
+  width: 100%;
+  margin: 12px 0 4px;
 }
 .btn.ghost {
   background: transparent;

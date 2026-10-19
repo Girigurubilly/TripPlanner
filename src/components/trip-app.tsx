@@ -60,6 +60,7 @@ import {
 import { DrivePanel } from "@/components/drive-panel";
 import { syncTripDriveIfDue } from "@/lib/drive-sync";
 import { AI_TRIP_PROMPT } from "@/lib/ai-prompt";
+import { loadMoneyLinks, moneySpendUrl, moneyTripIdForBook, rankTripBooks, readMoneyRef, rememberMoneyRef, saveMoneyLink, spendOnDay, type MoneyTripRef } from "@/lib/money-link";
 import { startLocate, type PlaceFix } from "@/lib/geo";
 
 const TAB_ICON: Record<string, LucideIcon> = {
@@ -257,6 +258,7 @@ export function TripApp() {
   const [dragOver, setDragOver] = useState(false);
   const [promptFallback, setPromptFallback] = useState(false);
   const [rev, setRev] = useState(0);
+  const [moneyAsk, setMoneyAsk] = useState<MoneyTripRef | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -265,8 +267,27 @@ export function TripApp() {
     setTrips(stored);
     const returning =
       window.location.hash.includes("access_token") || window.location.hash.includes("error=");
+    const money = returning ? null : readMoneyRef(window.location.search);
     const live = stored.find((trip) => todayDay(trip));
-    if (!returning && live) {
+    if (money) {
+      rememberMoneyRef(money);
+      const ranked = rankTripBooks(stored, money, loadMoneyLinks());
+      if (ranked.best) {
+        saveMoneyLink(money.id, ranked.best.id);
+        rememberMoneyRef({ ...money, book: ranked.best.id });
+        const today = todayDay(ranked.best);
+        setOpenId(ranked.best.id);
+        setTab(today ? "days" : "");
+        setDayId(today?.id || ranked.best.days[0]?.id || "");
+        setStatus(`已打開同「${money.name || money.dest || "呢趟"}」同一趟。`);
+      } else {
+        setMoneyAsk(money);
+        setStatus(stored.length ? "揀邊一個行程書係呢趟。" : "呢部機未有行程。上傳之後再配對。");
+      }
+      const url = new URL(window.location.href);
+      for (const key of ["money", "start", "end", "name", "dest", "book"]) url.searchParams.delete(key);
+      window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+    } else if (!returning && live) {
       setOpenId(live.id);
       setTab("days");
       setDayId(todayDay(live)?.id || "");
@@ -425,12 +446,32 @@ export function TripApp() {
                       setTrips(deleteTrip(trips, trip.id));
                       setStatus(`已刪除「${trip.title}」`);
                     }}
+                    onPick={
+                      moneyAsk
+                        ? () => {
+                            saveMoneyLink(moneyAsk.id, trip.id);
+                            rememberMoneyRef({ ...moneyAsk, book: trip.id });
+                            setMoneyAsk(null);
+                            const today = todayDay(trip);
+                            setOpenId(trip.id);
+                            setTab(today ? "days" : "");
+                            setDayId(today?.id || trip.days[0]?.id || "");
+                            setStatus(`已配對「${trip.title}」。`);
+                          }
+                        : undefined
+                    }
                   />
                 ))}
               </div>
             </section>
           )}
           {status ? <p className="status">{status}</p> : null}
+          {moneyAsk ? (
+            <p className="status">
+              理財 App 想打開「{moneyAsk.name || moneyAsk.dest || "呢趟"}」
+              {moneyAsk.start ? ` · ${moneyAsk.start} → ${moneyAsk.end}` : ""}。撳「呢個就係」先配對。
+            </p>
+          ) : null}
           {error ? <p className="status error">{error}</p> : null}
           <p className="prompt-row">
             <button className="prompt-link" type="button" onClick={() => void copyPrompt()}>
@@ -464,10 +505,12 @@ function TripCard({
   trip,
   onOpen,
   onDelete,
+  onPick,
 }: {
   trip: TripBook;
   onOpen: () => void;
   onDelete: () => void;
+  onPick?: () => void;
 }) {
   const [confirm, setConfirm] = useState(false);
   const cover = coverOf(trip);
@@ -495,6 +538,11 @@ function TripCard({
         </span>
       </div>
       <div className="tile-actions">
+        {onPick ? (
+          <button className="btn primary" type="button" onClick={onPick}>
+            呢個就係
+          </button>
+        ) : null}
         <button className="icon-btn" type="button" aria-label="儲存行程" onClick={() => void downloadTrip(trip)}>
           <Download size={18} aria-hidden="true" />
         </button>
@@ -1614,6 +1662,15 @@ function DayScreen({
         </div>
       ) : null}
       <DayFacts day={day} />
+      {(() => {
+        const costs = spendOnDay(trip, day);
+        if (!costs.length) return null;
+        return (
+          <a className="btn primary money-send" href={moneySpendUrl({ trip: trip.title, tripId: moneyTripIdForBook(trip.id), items: costs })}>
+            將呢日開支交去理財確認
+          </a>
+        );
+      })()}
       <div ref={readRef}>
         {day.leadHtml ? (
           leadLong(day.leadHtml) ? (
