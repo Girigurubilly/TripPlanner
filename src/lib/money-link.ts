@@ -140,6 +140,17 @@ export function parsePrice(raw: string): { amount: number; currency: string } | 
   return { amount, currency };
 }
 
+export function spendItem(trip: TripBook, day: TripDay, label: string, price: string): SpendItem | null {
+  const index = trip.days.findIndex((item) => item.id === day.id);
+  const date = dayDates(trip)[index];
+  if (!(date instanceof Date)) return null;
+  const parsed = parsePrice(price);
+  if (!parsed) return null;
+  const name = label.trim().slice(0, 80);
+  if (!name) return null;
+  return { date: isoDate(date), label: name, amount: parsed.amount, currency: parsed.currency };
+}
+
 export function spendOnDay(trip: TripBook, day: TripDay): SpendItem[] {
   const index = trip.days.findIndex((item) => item.id === day.id);
   const date = dayDates(trip)[index];

@@ -62,7 +62,7 @@ import {
 import { DrivePanel } from "@/components/drive-panel";
 import { syncTripDriveIfDue } from "@/lib/drive-sync";
 import { AI_TRIP_PROMPT } from "@/lib/ai-prompt";
-import { loadMoneyLinks, moneyLinkBackUrl, moneySpendUrl, moneyTripIdForBook, rankTripBooks, readMoneyRef, rememberMoneyRef, saveMoneyLink, spendOnDay, type MoneyTripRef } from "@/lib/money-link";
+import { loadMoneyLinks, moneyLinkBackUrl, moneySpendUrl, moneyTripIdForBook, rankTripBooks, readMoneyRef, rememberMoneyRef, saveMoneyLink, spendItem, type MoneyTripRef } from "@/lib/money-link";
 import { startLocate, type PlaceFix } from "@/lib/geo";
 
 const TAB_ICON: Record<string, LucideIcon> = {
@@ -886,6 +886,9 @@ function Book({
                 {spotView.price ? <div><dt>費用</dt><dd>{spotView.price}</dd></div> : null}
               </dl>
             ) : null}
+            {activeDay && detailItem ? (
+              <SpotMoney trip={trip} day={activeDay} label={detailItem.name} price={spotView?.price || detailItem.price} />
+            ) : null}
             {detailItem.image ? (
               <figure className="spot-figure">
                 <a href={detailItem.image} target="_blank" rel="noopener">
@@ -1706,15 +1709,6 @@ function DayScreen({
         </div>
       ) : null}
       <DayFacts day={day} />
-      {(() => {
-        const costs = spendOnDay(trip, day);
-        if (!costs.length) return null;
-        return (
-          <a className="btn primary money-send" href={moneySpendUrl({ trip: trip.title, tripId: moneyTripIdForBook(trip.id), items: costs })}>
-            將呢日開支交去理財確認
-          </a>
-        );
-      })()}
       <div ref={readRef}>
         {day.leadHtml ? (
           leadLong(day.leadHtml) ? (
@@ -1800,6 +1794,7 @@ function DayScreen({
                           <small>{[mealItem.address, mealItem.price].filter(Boolean).join(" · ")}</small>
                         ) : null}
                         {at ? <span className="pill-hint">{visitClock(at)} 已去</span> : null}
+                        <SpotMoney trip={trip} day={day} label={mealItem.name} price={mealItem.price} compact />
                       </span>
                       <button
                         className={at ? "stamp on" : "stamp"}
@@ -1838,6 +1833,7 @@ function DayScreen({
                         <small>{[spotItem.address, spotItem.price].filter(Boolean).join(" · ")}</small>
                       ) : null}
                       {at ? <span className="pill-hint">{visitClock(at)} 已去</span> : null}
+                      <SpotMoney trip={trip} day={day} label={spotItem.name} price={spotItem.price} compact />
                     </span>
                     <button
                       className={at ? "stamp on" : "stamp"}
@@ -1968,6 +1964,32 @@ function planItems(day: TripDay): PlanItem[] {
     if (!placed.has(index)) items.push({ kind: "spot", index, num: index + 1 });
   });
   return items;
+}
+
+function SpotMoney({
+  trip,
+  day,
+  label,
+  price,
+  compact,
+}: {
+  trip: TripBook;
+  day: TripDay;
+  label: string;
+  price: string;
+  compact?: boolean;
+}) {
+  const item = spendItem(trip, day, label, price);
+  if (!item) return null;
+  return (
+    <a
+      className={compact ? "money-spot" : "btn primary money-send"}
+      href={moneySpendUrl({ trip: trip.title, tripId: moneyTripIdForBook(trip.id), items: [item] })}
+      onClick={(event) => event.stopPropagation()}
+    >
+      {compact ? "入帳" : "將呢項交去理財確認"}
+    </a>
+  );
 }
 
 function RideCard({ ride, onOpenRide }: { ride: Ride; onOpenRide?: (ride: Ride) => void }) {

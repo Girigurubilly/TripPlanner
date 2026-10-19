@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { moneyLinkBackUrl, moneySpendUrl, parsePrice, rankTripBooks, readMoneyRef, spendOnDay } from "./money-link.ts";
+import { moneyLinkBackUrl, moneySpendUrl, parsePrice, rankTripBooks, readMoneyRef, spendItem, spendOnDay } from "./money-link.ts";
 import type { TripBook } from "./trip.ts";
 
 function book(patch: Partial<TripBook> & Pick<TripBook, "id" | "title">): TripBook {
@@ -49,6 +49,8 @@ describe("money link", () => {
     assert.deepEqual(parsePrice("€2.20"), { amount: 2.2, currency: "EUR" });
     const items = spendOnDay(osaka, osaka.days[0]);
     assert.equal(items.length, 2);
+    assert.equal(spendItem(osaka, osaka.days[0], "通天閣", "¥800")?.amount, 800);
+    assert.equal(spendItem(osaka, osaka.days[0], "通天閣", "免費"), null);
     assert.equal(items[0]?.date, "2026-04-02");
     const url = new URL(moneySpendUrl({ trip: "大阪散步", tripId: "osaka", items }));
     assert.match(url.hash, /^#proposal=/);

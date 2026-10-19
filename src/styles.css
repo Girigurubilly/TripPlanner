@@ -153,6 +153,19 @@
   width: 100%;
   margin: 12px 0 4px;
 }
+.money-spot {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  margin-top: 6px;
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 0.75rem;
+  font-weight: 650;
+}
 .btn.ghost {
   background: transparent;
 }
