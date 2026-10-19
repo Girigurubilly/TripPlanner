@@ -158,6 +158,7 @@ export function spendOnDay(trip: TripBook, day: TripDay): SpendItem[] {
     items.push({ date: iso, label: name, amount: parsed.amount, currency: parsed.currency });
   };
   for (const spot of day.spots) push(spot.name, spot.price);
+  for (const meal of day.meals) push(meal.name, meal.price);
   for (const ride of day.rides) push(ride.detail || `${ride.from} → ${ride.to}`, ride.price);
   return items.slice(0, 20);
 }
