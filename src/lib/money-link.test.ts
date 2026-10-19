@@ -54,6 +54,8 @@ describe("money link", () => {
     assert.equal(items.length, 2);
     assert.equal(spendItem(osaka, osaka.days[0], "通天閣", "¥800")?.amount, 800);
     assert.equal(spendItem(osaka, osaka.days[0], "通天閣", "免費"), null);
+    assert.equal(spendItem(osaka, osaka.days[0], "通天閣", "免費", true)?.amount, 0);
+    assert.equal(spendItem(osaka, osaka.days[0], "通天閣", "", true)?.currency, "HKD");
     assert.equal(items[0]?.date, "2026-04-02");
     const url = new URL(moneySpendUrl({ trip: "大阪散步", tripId: "osaka", items }));
     assert.match(url.hash, /^#proposal=/);

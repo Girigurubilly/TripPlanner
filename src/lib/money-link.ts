@@ -149,14 +149,17 @@ export function dayIdForDate(trip: TripBook, iso: string): string {
   return index >= 0 ? trip.days[index]?.id || "" : "";
 }
 
-export function spendItem(trip: TripBook, day: TripDay, label: string, price: string): SpendItem | null {
+export function spendItem(trip: TripBook, day: TripDay, label: string, price: string, blank = false): SpendItem | null {
   const index = trip.days.findIndex((item) => item.id === day.id);
   const date = dayDates(trip)[index];
   if (!(date instanceof Date)) return null;
-  const parsed = parsePrice(price);
-  if (!parsed) return null;
   const name = label.trim().slice(0, 80);
   if (!name) return null;
+  const parsed = parsePrice(price);
+  if (!parsed) {
+    if (!blank) return null;
+    return { date: isoDate(date), label: name, amount: 0, currency: "HKD" };
+  }
   return { date: isoDate(date), label: name, amount: parsed.amount, currency: parsed.currency };
 }
 

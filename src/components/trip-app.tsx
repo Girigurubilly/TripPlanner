@@ -903,7 +903,7 @@ function Book({
               </dl>
             ) : null}
             {activeDay && detailItem ? (
-              <SpotMoney trip={trip} day={activeDay} label={detailItem.name} price={spotView?.price || detailItem.price} />
+              <SpotMoney trip={trip} day={activeDay} label={detailItem.name} price={spotView?.price || detailItem.price} blank />
             ) : null}
             {detailItem.image ? (
               <figure className="spot-figure">
@@ -1774,6 +1774,8 @@ function DayScreen({
                 return (
                   <RideCard
                     key={`${item.ride.from}-${item.ride.to}-${item.ride.detail}`}
+                    trip={trip}
+                    day={day}
                     ride={item.ride}
                     onOpenRide={(ride) => {
                       const entryId = ride.entry;
@@ -1823,7 +1825,7 @@ function DayScreen({
                           <small>{[mealItem.address, mealItem.price].filter(Boolean).join(" · ")}</small>
                         ) : null}
                         {at ? <span className="pill-hint">{visitClock(at)} 已去</span> : null}
-                        <SpotMoney trip={trip} day={day} label={mealItem.name} price={mealItem.price} compact />
+                        <SpotMoney trip={trip} day={day} label={mealItem.name} price={mealItem.price} compact blank />
                       </span>
                       <button
                         className={at ? "stamp on" : "stamp"}
@@ -1901,7 +1903,7 @@ function DayScreen({
                         <small>{[spotItem.address, spotItem.price].filter(Boolean).join(" · ")}</small>
                       ) : null}
                       {at ? <span className="pill-hint">{visitClock(at)} 已去</span> : null}
-                      <SpotMoney trip={trip} day={day} label={spotItem.name} price={spotItem.price} compact />
+                      <SpotMoney trip={trip} day={day} label={spotItem.name} price={spotItem.price} compact blank />
                     </span>
                     <button
                       className={at ? "stamp on" : "stamp"}
@@ -2043,14 +2045,16 @@ function SpotMoney({
   label,
   price,
   compact,
+  blank,
 }: {
   trip: TripBook;
   day: TripDay;
   label: string;
   price: string;
   compact?: boolean;
+  blank?: boolean;
 }) {
-  const item = spendItem(trip, day, label, price);
+  const item = spendItem(trip, day, label, price, blank);
   if (!item) return null;
   return (
     <a
@@ -2065,7 +2069,17 @@ function SpotMoney({
   );
 }
 
-function RideCard({ ride, onOpenRide }: { ride: Ride; onOpenRide?: (ride: Ride) => void }) {
+function RideCard({
+  ride,
+  trip,
+  day,
+  onOpenRide,
+}: {
+  ride: Ride;
+  trip?: TripBook;
+  day?: TripDay;
+  onOpenRide?: (ride: Ride) => void;
+}) {
   const line = [ride.detail, ride.price].filter(Boolean).join(" · ");
   const [open, setOpen] = useState(false);
   const openable = Boolean((ride.entry || ride.spot) && onOpenRide);
@@ -2089,6 +2103,9 @@ function RideCard({ ride, onOpenRide }: { ride: Ride; onOpenRide?: (ride: Ride) 
         ) : (
           <p className="tiny">{ride.note}</p>
         )
+      ) : null}
+      {trip && day ? (
+        <SpotMoney trip={trip} day={day} label={ride.detail || `${ride.from} → ${ride.to}`} price={ride.price} compact />
       ) : null}
     </div>
   );
@@ -2305,7 +2322,7 @@ function Transport({ trip, dayId, onDay }: { trip: TripBook; dayId: string; onDa
           {day.rides.length ? (
             <div className="sheet plan">
               {day.rides.map((ride) => (
-                <RideCard key={`${day.id}-${ride.from}-${ride.to}-${ride.detail}`} ride={ride} />
+                <RideCard key={`${day.id}-${ride.from}-${ride.to}-${ride.detail}`} trip={trip} day={day} ride={ride} />
               ))}
             </div>
           ) : (
