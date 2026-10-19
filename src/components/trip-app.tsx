@@ -45,11 +45,13 @@ import {
   tripTiming,
   upsertTrips,
   visitKey,
+  mealVisitKey,
   writeCheck,
   writeVisit,
   addExtra,
   loadExtras,
   removeExtra,
+  type DayEntry,
   type ExtraStop,
   type TripBook,
   type TripSpot,
@@ -227,7 +229,7 @@ function plainText(html: string): string {
   return html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
 }
 
-type SearchHit = { dayId: string; spot: number; title: string; meta: string };
+type SearchHit = { dayId: string; kind: "day" | "spot" | "meal"; index: number; title: string; meta: string };
 
 function searchTrip(trip: TripBook, query: string): SearchHit[] {
   const needle = query.trim().toLowerCase();
@@ -235,15 +237,20 @@ function searchTrip(trip: TripBook, query: string): SearchHit[] {
   const hits: SearchHit[] = [];
   for (const day of trip.days) {
     if (`${day.label} ${day.title}`.toLowerCase().includes(needle)) {
-      hits.push({ dayId: day.id, spot: -1, title: day.title || day.label, meta: day.label });
+      hits.push({ dayId: day.id, kind: "day", index: -1, title: day.title || day.label, meta: day.label });
     }
     day.spots.forEach((spot, index) => {
       const blob = `${spot.name} ${spot.badge} ${spot.hours} ${spot.address} ${spot.price} ${plainText(spot.html)}`.toLowerCase();
       if (!blob.includes(needle)) return;
-      hits.push({ dayId: day.id, spot: index, title: spot.name, meta: `${day.label}${spot.badge ? ` · ${spot.badge}` : ""}` });
+      hits.push({ dayId: day.id, kind: "spot", index, title: spot.name, meta: `${day.label}${spot.badge ? ` · ${spot.badge}` : ""}` });
+    });
+    day.meals.forEach((meal, index) => {
+      const blob = `${meal.name} ${meal.place} ${meal.slot} ${meal.note} ${meal.hours} ${meal.address} ${meal.price} ${plainText(meal.html)}`.toLowerCase();
+      if (!blob.includes(needle)) return;
+      hits.push({ dayId: day.id, kind: "meal", index, title: meal.name, meta: `${day.label}${meal.slot ? ` · ${meal.slot}` : ""} · 🍽️ 用餐` });
     });
   }
-  hits.sort((a, b) => Number(!(a.spot >= 0 && a.title.toLowerCase().includes(needle))) - Number(!(b.spot >= 0 && b.title.toLowerCase().includes(needle))));
+  hits.sort((a, b) => Number(!(a.kind !== "day" && a.title.toLowerCase().includes(needle))) - Number(!(b.kind !== "day" && b.title.toLowerCase().includes(needle))));
   return hits.slice(0, 40);
 }
 
@@ -595,14 +602,14 @@ function Book({
   const activeTab = tab || (trip.days.length ? "days" : "overview");
   const activeDay = trip.days.find((day) => day.id === dayId) || trip.days[0];
   const [lightbox, setLightbox] = useState("");
-  const [spotAt, setSpotAt] = useState<number | null>(null);
+  const [entryAt, setEntryAt] = useState<DayEntry | null>(null);
   const [topicAt, setTopicAt] = useState<number | null>(null);
   const [searching, setSearching] = useState(false);
   const [query, setQuery] = useState("");
   const [checkTick, setCheckTick] = useState(0);
   const [visitTick, setVisitTick] = useState(0);
   const scrollDay = useRef("");
-  const pendingSpot = useRef<number | undefined>(undefined);
+  const pendingEntry = useRef<DayEntry | undefined>(undefined);
   const pendingTopic = useRef<number | undefined>(undefined);
   const scrollPlace = useRef("");
   const mainRef = useRef<HTMLElement>(null);
@@ -624,7 +631,7 @@ function Book({
 
   useEffect(() => {
     if (mainRef.current) labelTables(mainRef.current);
-  }, [activeTab, activeDay?.id, trip.id, topicAt, spotAt]);
+  }, [activeTab, activeDay?.id, trip.id, topicAt, entryAt]);
 
   useEffect(() => {
     if (activeTab !== "transport" || !scrollDay.current) return;
@@ -677,12 +684,12 @@ function Book({
         : "overview";
 
   useEffect(() => {
-    if (pendingSpot.current === undefined) {
-      setSpotAt(null);
+    if (pendingEntry.current === undefined) {
+      setEntryAt(null);
       return;
     }
-    setSpotAt(pendingSpot.current >= 0 ? pendingSpot.current : null);
-    pendingSpot.current = undefined;
+    setEntryAt(pendingEntry.current);
+    pendingEntry.current = undefined;
   }, [activeDay?.id]);
 
   useEffect(() => {
@@ -747,10 +754,18 @@ function Book({
   const progress = useMemo(() => bookingProgress(trip), [trip, checkTick]);
   const visits = useMemo(() => loadVisits(trip.id), [trip.id, visitTick]);
   const hits = useMemo(() => (searching ? searchTrip(trip, query) : []), [searching, trip, query]);
-  const spot = activeDay && spotAt !== null ? activeDay.spots[spotAt] : undefined;
-  const spotView = useMemo(() => (spot ? presentSpot(spot) : null), [spot]);
+  const entrySpot = activeDay && entryAt?.kind === "spot" ? activeDay.spots[entryAt.index] : undefined;
+  const entryMeal = activeDay && entryAt?.kind === "meal" ? activeDay.meals[entryAt.index] : undefined;
+  const detailItem = entrySpot || entryMeal;
+  const detailKey =
+    activeDay && entryAt
+      ? entryAt.kind === "meal"
+        ? mealVisitKey(activeDay.id, entryAt.index)
+        : visitKey(activeDay.id, entryAt.index)
+      : "";
+  const spotView = useMemo(() => (detailItem ? presentSpot(detailItem) : null), [detailItem]);
   let screenTitle = trip.title;
-  if (spot) screenTitle = spot.name;
+  if (detailItem) screenTitle = detailItem.name;
   else if (rootTab === "days" && activeDay) screenTitle = activeDay.label || activeDay.title;
   else if (rootTab === "transport") screenTitle = "交通";
   else if (rootTab === "map") screenTitle = "地圖";
@@ -761,13 +776,13 @@ function Book({
   else screenTitle = "總覽";
 
   function openHit(hit: SearchHit) {
-    pendingSpot.current = hit.spot;
+    pendingEntry.current = hit.kind === "day" ? undefined : { kind: hit.kind, index: hit.index };
     setSearching(false);
     setQuery("");
     onTab("days");
     if (hit.dayId === activeDay?.id) {
-      setSpotAt(hit.spot >= 0 ? hit.spot : null);
-      pendingSpot.current = undefined;
+      setEntryAt(hit.kind === "day" ? null : { kind: hit.kind, index: hit.index });
+      pendingEntry.current = undefined;
     } else {
       onDay(hit.dayId);
     }
@@ -780,8 +795,8 @@ function Book({
       setQuery("");
       return;
     }
-    if (spotAt !== null) {
-      setSpotAt(null);
+    if (entryAt !== null) {
+      setEntryAt(null);
       return;
     }
     if (topicAt !== null) {
@@ -800,7 +815,7 @@ function Book({
   function openDock(id: string) {
     setSearching(false);
     setQuery("");
-    setSpotAt(null);
+    setEntryAt(null);
     setTopicAt(null);
     onTab(id);
     window.scrollTo({ top: 0 });
@@ -809,7 +824,7 @@ function Book({
   return (
     <div className="app book app-shell" onClick={onContentClick}>
       <header className="topbar">
-        <button className="icon-btn" type="button" aria-label={searching || spot || topic || openGuide ? "返回" : "返回行程庫"} onClick={goBack}>
+        <button className="icon-btn" type="button" aria-label={searching || detailItem || topic || openGuide ? "返回" : "返回行程庫"} onClick={goBack}>
           <ChevronLeft size={20} aria-hidden="true" />
         </button>
         {searching ? (
@@ -836,7 +851,7 @@ function Book({
             {query.trim() && !hits.length ? <p className="muted search-hint">冇搵到「{query.trim()}」</p> : null}
             <div className="sheet">
               {hits.map((hit) => (
-                <div className="navrow" key={`${hit.dayId}-${hit.spot}-${hit.title}`} onClick={() => openHit(hit)}>
+                <div className="navrow" key={`${hit.dayId}-${hit.kind}-${hit.index}-${hit.title}`} onClick={() => openHit(hit)}>
                   <span className="navrow-main">
                     <strong>{hit.title}</strong>
                     <span className="pill-hint">{hit.meta}</span>
@@ -848,19 +863,20 @@ function Book({
           </section>
         ) : null}
 
-        {!searching && spot && activeDay ? (
+        {!searching && detailItem && activeDay ? (
           <article className="screen reading">
-            {spot.badge ? <p className="spot-badge-row"><span className={`badge ${spot.tone}`}>{spot.badge}</span></p> : null}
-            {mapLink(spot) ? (
-              <a className="btn primary nav-go" href={mapLink(spot)} target="_blank" rel="noopener">
+            {entryMeal ? <p className="spot-badge-row"><span className="badge meal">🍽️ 用餐{entryMeal.slot ? ` · ${entryMeal.slot}` : ""}</span></p> : null}
+            {detailItem.badge ? <p className="spot-badge-row"><span className={`badge ${detailItem.tone}`}>{detailItem.badge}</span></p> : null}
+            {mapLink(detailItem) ? (
+              <a className="btn primary nav-go" href={mapLink(detailItem)} target="_blank" rel="noopener">
                 <Navigation size={18} aria-hidden="true" />
                 導航
               </a>
             ) : null}
-            {activeDay && spotAt !== null ? (
+            {activeDay && detailKey ? (
               <CheckIn
-                at={visits[visitKey(activeDay.id, spotAt)] || ""}
-                onToggle={() => toggleVisit(trip.id, visitKey(activeDay.id, spotAt), visits[visitKey(activeDay.id, spotAt)] || "")}
+                at={visits[detailKey] || ""}
+                onToggle={() => toggleVisit(trip.id, detailKey, visits[detailKey] || "")}
               />
             ) : null}
             {spotView && (spotView.hours || spotView.address || spotView.price) ? (
@@ -870,26 +886,26 @@ function Book({
                 {spotView.price ? <div><dt>費用</dt><dd>{spotView.price}</dd></div> : null}
               </dl>
             ) : null}
-            {spot.image ? (
+            {detailItem.image ? (
               <figure className="spot-figure">
-                <a href={spot.image} target="_blank" rel="noopener">
-                  <img src={spot.image} alt={spot.name} loading="lazy" />
+                <a href={detailItem.image} target="_blank" rel="noopener">
+                  <img src={detailItem.image} alt={detailItem.name} loading="lazy" />
                 </a>
               </figure>
             ) : null}
             {spotView ? <SpotBody brief={spotView.brief} deep={spotView.deep} /> : null}
-            {spot.refLink ? (
+            {detailItem.refLink ? (
               <p className="spot-ref">
-                <a href={spot.refLink} target="_blank" rel="noreferrer">
-                  📖 {spot.refLabel || "參考遊記"}
+                <a href={detailItem.refLink} target="_blank" rel="noreferrer">
+                  📖 {detailItem.refLabel || "參考遊記"}
                 </a>
               </p>
             ) : null}
-            <SpotDining day={activeDay} spot={spot} guide={trip.guides.find((item) => item.id === "food" || /美食/.test(item.label))} />
+            {entrySpot ? <SpotDining day={activeDay} spot={entrySpot} guide={trip.guides.find((item) => item.id === "food" || /美食/.test(item.label))} /> : null}
           </article>
         ) : null}
 
-        {!searching && !spot && rootTab === "overview" ? (
+        {!searching && !detailItem && rootTab === "overview" ? (
           <article className="screen reading">
             <h1 className="screen-title">{trip.title}</h1>
             {trip.subtitle ? <p className="lede">{trip.subtitle}</p> : null}
@@ -925,17 +941,21 @@ function Book({
           </article>
         ) : null}
 
-        {!searching && !spot && rootTab === "days" && activeDay ? (
+        {!searching && !detailItem && rootTab === "days" && activeDay ? (
           <DayScreen
             trip={trip}
             day={activeDay}
             onDay={(id) => {
-              setSpotAt(null);
+              setEntryAt(null);
               onDay(id);
               window.scrollTo({ top: 0 });
             }}
             onSpot={(index) => {
-              setSpotAt(index);
+              setEntryAt({ kind: "spot", index });
+              window.scrollTo({ top: 0 });
+            }}
+            onMeal={(index) => {
+              setEntryAt({ kind: "meal", index });
               window.scrollTo({ top: 0 });
             }}
             onMap={() => onTab("map")}
@@ -943,22 +963,22 @@ function Book({
           />
         ) : null}
 
-        {!searching && !spot && rootTab === "transport" ? <Transport trip={trip} dayId={activeDay?.id || ""} onDay={onDay} /> : null}
+        {!searching && !detailItem && rootTab === "transport" ? <Transport trip={trip} dayId={activeDay?.id || ""} onDay={onDay} /> : null}
 
-        {!searching && !spot && rootTab === "map" && activeDay ? (
+        {!searching && !detailItem && rootTab === "map" && activeDay ? (
           <TripMap
             trip={trip}
             day={activeDay}
             onDay={onDay}
             onSpot={(index) => {
-              setSpotAt(index);
+              setEntryAt({ kind: "spot", index });
               onTab("days");
               window.scrollTo({ top: 0 });
             }}
           />
         ) : null}
 
-        {!searching && !spot && rootTab === "eat" && openEat ? (
+        {!searching && !detailItem && rootTab === "eat" && openEat ? (
           <section className="screen">
             <div className="segment">
               {eatGuides.map((guide) => (
@@ -991,7 +1011,7 @@ function Book({
           </section>
         ) : null}
 
-        {!searching && !spot && rootTab === "guides" && !openGuide ? (
+        {!searching && !detailItem && rootTab === "guides" && !openGuide ? (
           <section className="screen">
             <h1 className="screen-title">指南</h1>
             {guideMenus.map((menu) => (
@@ -1004,7 +1024,7 @@ function Book({
                         key={`${menu.guide.id}-${item.index}`}
                         onClick={() => {
                           pendingTopic.current = item.index;
-                          setSpotAt(null);
+                          setEntryAt(null);
                           onTab(menu.guide.id);
                           window.scrollTo({ top: 0 });
                         }}
@@ -1021,7 +1041,7 @@ function Book({
           </section>
         ) : null}
 
-        {!searching && !spot && openGuide && topicAt === null ? (
+        {!searching && !detailItem && openGuide && topicAt === null ? (
           <section className="screen">
             {guideParsed?.lead ? <div className="reading lede-block" dangerouslySetInnerHTML={{ __html: guideParsed.lead }} /> : null}
             <div className="sheet">
@@ -1045,12 +1065,12 @@ function Book({
           </section>
         ) : null}
 
-        {!searching && !spot && topic ? (
+        {!searching && !detailItem && topic ? (
           <article className="screen reading" dangerouslySetInnerHTML={{ __html: topicHtml || topic.html }} />
         ) : null}
 
-        {trip.footer && !searching && !spot && topicAt === null && rootTab !== "map" ? <p className="foot">{trip.footer}</p> : null}
-        {!searching && !spot && topicAt === null && rootTab === "overview" ? (
+        {trip.footer && !searching && !detailItem && topicAt === null && rootTab !== "map" ? <p className="foot">{trip.footer}</p> : null}
+        {!searching && !detailItem && topicAt === null && rootTab === "overview" ? (
           <button className="btn save-trip" type="button" onClick={() => void downloadTrip(trip)}>
             <Download size={18} aria-hidden="true" />
             儲存行程
@@ -1589,6 +1609,7 @@ function DayScreen({
   visits,
   onDay,
   onSpot,
+  onMeal,
   onMap,
 }: {
   trip: TripBook;
@@ -1596,6 +1617,7 @@ function DayScreen({
   visits: Record<string, string>;
   onDay: (id: string) => void;
   onSpot: (index: number) => void;
+  onMeal: (index: number) => void;
   onMap: () => void;
 }) {
   const index = trip.days.findIndex((item) => item.id === day.id);
@@ -1608,7 +1630,17 @@ function DayScreen({
   const [hero, ...moreImages] = day.images;
   const chipRef = useRef<HTMLDivElement>(null);
   const readRef = useRef<HTMLDivElement>(null);
-  const seen = day.spots.filter((_, spotIndex) => visits[visitKey(day.id, spotIndex)]).length;
+  // Unified-timeline days count check-ins over every timeline entry (sights +
+  // meals); legacy days count sights only, as before.
+  const seen = day.timeline.length
+    ? day.timeline.filter((entryId) => {
+        const spotIndex = day.spots.findIndex((spot) => spot.id === entryId);
+        if (spotIndex >= 0) return Boolean(visits[visitKey(day.id, spotIndex)]);
+        const mealIndex = day.meals.findIndex((meal) => meal.id === entryId);
+        return mealIndex >= 0 && Boolean(visits[mealVisitKey(day.id, mealIndex)]);
+      }).length
+    : day.spots.filter((_, spotIndex) => visits[visitKey(day.id, spotIndex)]).length;
+  const totalEntries = day.timeline.length || day.spots.length;
   useEffect(() => {
     const strip = chipRef.current?.parentElement;
     const chip = chipRef.current;
@@ -1710,12 +1742,12 @@ function DayScreen({
               <button className="map-jump" type="button" onClick={onMap}>
                 地圖
               </button>
-              <span className="muted">已去 {seen}／{day.spots.length}</span>
+              <span className="muted">已去 {seen}／{totalEntries}</span>
             </span>
           </h2>
-          {day.spots.length ? (
+          {totalEntries ? (
             <div className="meter" aria-hidden="true">
-              <span style={{ width: `${Math.round((seen / day.spots.length) * 100)}%` }} />
+              <span style={{ width: `${Math.round((seen / totalEntries) * 100)}%` }} />
             </div>
           ) : null}
           <div className="timeline">
@@ -1725,18 +1757,71 @@ function DayScreen({
                   <RideCard
                     key={`${item.ride.from}-${item.ride.to}-${item.ride.detail}`}
                     ride={item.ride}
-                    onOpenSpot={(name) => {
-                      const spotIndex = day.spots.findIndex((spot) => spot.name === name);
+                    onOpenRide={(ride) => {
+                      const entryId = ride.entry;
+                      if (entryId) {
+                        const spotIndex = day.spots.findIndex((spot) => spot.id === entryId);
+                        if (spotIndex >= 0) {
+                          onSpot(spotIndex);
+                          return;
+                        }
+                        const mealIndex = day.meals.findIndex((meal) => meal.id === entryId);
+                        if (mealIndex >= 0) {
+                          onMeal(mealIndex);
+                          return;
+                        }
+                      }
+                      // Legacy fallback: pair by destination name.
+                      const spotIndex = day.spots.findIndex((spot) => spot.name === ride.spot);
                       if (spotIndex >= 0) onSpot(spotIndex);
                     }}
                   />
                 );
+              if (item.kind === "meal") {
+                const mealIndex = item.index;
+                const mealItem = day.meals[mealIndex];
+                const at = visits[mealVisitKey(day.id, mealIndex)] || "";
+                return (
+                  <article className={at ? "stop meal done" : "stop meal"} key={`meal-${mealItem.id}`}>
+                    <span className="stop-num">{item.num}</span>
+                    <div className="stop-card" onClick={() => onMeal(mealIndex)} role="link">
+                      {mealItem.image ? (
+                        <img className="stop-thumb" src={mealItem.image} alt="" loading="lazy" />
+                      ) : (
+                        <span className="stop-thumb empty" aria-hidden="true">🍽️</span>
+                      )}
+                      <span className="stop-copy">
+                        <strong>
+                          {mealItem.name}
+                          {mealItem.badge ? <em>{mealItem.badge}</em> : null}
+                        </strong>
+                        <small className="kind-chip">🍽️ 用餐{mealItem.slot ? ` · ${mealItem.slot}` : ""}</small>
+                        {mealItem.address || mealItem.price ? (
+                          <small>{[mealItem.address, mealItem.price].filter(Boolean).join(" · ")}</small>
+                        ) : null}
+                        {at ? <span className="pill-hint">{visitClock(at)} 已去</span> : null}
+                      </span>
+                      <button
+                        className={at ? "stamp on" : "stamp"}
+                        type="button"
+                        aria-label={at ? "取消打卡" : "打卡"}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          toggleVisit(trip.id, mealVisitKey(day.id, mealIndex), at);
+                        }}
+                      >
+                        {at ? "已去" : "打卡"}
+                      </button>
+                    </div>
+                  </article>
+                );
+              }
               const spotIndex = item.index;
               const spotItem = day.spots[spotIndex];
               const at = visits[visitKey(day.id, spotIndex)] || "";
               return (
                 <article className={at ? "stop done" : "stop"} key={`${spotItem.name}-${spotIndex}`}>
-                  <span className="stop-num">{spotIndex + 1}</span>
+                  <span className="stop-num">{item.num}</span>
                   <div className="stop-card" onClick={() => onSpot(spotIndex)} role="link">
                     {spotItem.image ? (
                       <img className="stop-thumb" src={spotItem.image} alt="" loading="lazy" />
@@ -1748,6 +1833,7 @@ function DayScreen({
                         {spotItem.name}
                         {spotItem.badge ? <em>{spotItem.badge}</em> : null}
                       </strong>
+                      <small className="kind-chip">📷 景點</small>
                       {spotItem.address || spotItem.price ? (
                         <small>{[spotItem.address, spotItem.price].filter(Boolean).join(" · ")}</small>
                       ) : null}
@@ -1776,8 +1862,10 @@ function DayScreen({
         key={day.id} made React drop the first from its reconciliation map,
         so the old 今日美食 section was never unmounted and a new one
         stacked up on every date switch.
+        Unified-timeline days render meals on the timeline itself, so the
+        separate 今日美食 box is skipped there (no duplicated meals).
       */}
-      <DayMeals key={`meals-${day.id}`} trip={trip} day={day} />
+      {day.timeline.length ? null : <DayMeals key={`meals-${day.id}`} trip={trip} day={day} />}
       <DaySouvenirs key={`souv-${day.id}`} trip={trip} day={day} />
       {day.noteHtml ? (
         <div className="reading day-link">
@@ -1813,8 +1901,56 @@ function DayScreen({
   );
 }
 
-function planItems(day: TripDay): Array<{ kind: "ride"; ride: Ride } | { kind: "spot"; index: number }> {
-  const items: Array<{ kind: "ride"; ride: Ride } | { kind: "spot"; index: number }> = [];
+type PlanItem =
+  | { kind: "ride"; ride: Ride }
+  | { kind: "spot"; index: number; num: number }
+  | { kind: "meal"; index: number; num: number };
+
+function planItems(day: TripDay): PlanItem[] {
+  if (day.timeline.length) {
+    // Unified timeline: entries render in timeline order; each entry's paired
+    // ride goes immediately before it. Transit (unpaired) rides slot in by
+    // rides[] order: before the next paired ride after them, or at the end
+    // (so return-to-hotel legs render last, after rideless entries).
+    const byId = new Map<string, DayEntry>();
+    day.spots.forEach((spot, index) => byId.set(spot.id, { kind: "spot", index }));
+    day.meals.forEach((meal, index) => byId.set(meal.id, { kind: "meal", index }));
+    const rideFor = new Map<string, Ride>();
+    for (const ride of day.rides) {
+      if (ride.entry && byId.has(ride.entry) && !rideFor.has(ride.entry)) rideFor.set(ride.entry, ride);
+    }
+    const paired = new Set(rideFor.values());
+    const items: PlanItem[] = [];
+    const emitted = new Set<Ride>();
+    const emitRide = (ride: Ride) => {
+      if (emitted.has(ride)) return;
+      emitted.add(ride);
+      items.push({ kind: "ride", ride });
+    };
+    let cursor = 0;
+    day.timeline.forEach((entryId, position) => {
+      const entry = byId.get(entryId);
+      if (!entry) return;
+      const ride = rideFor.get(entryId);
+      if (ride) {
+        const stopAt = day.rides.indexOf(ride);
+        for (let i = cursor; i < stopAt; i++) {
+          const transit = day.rides[i];
+          if (transit && !paired.has(transit)) emitRide(transit);
+        }
+        cursor = Math.max(cursor, stopAt + 1);
+        emitRide(ride);
+      }
+      if (entry.kind === "spot") items.push({ kind: "spot", index: entry.index, num: position + 1 });
+      else items.push({ kind: "meal", index: entry.index, num: position + 1 });
+    });
+    // Leftovers: trailing transit rides plus any paired ride whose entry
+    // never appeared, in rides[] order. Nothing is dropped.
+    for (const ride of day.rides) emitRide(ride);
+    return items;
+  }
+  // Legacy days (no timeline): rides in order + the ride's spot, unplaced spots appended.
+  const items: PlanItem[] = [];
   const placed = new Set<number>();
   for (const ride of day.rides) {
     items.push({ kind: "ride", ride });
@@ -1824,24 +1960,24 @@ function planItems(day: TripDay): Array<{ kind: "ride"; ride: Ride } | { kind: "
       );
       if (index >= 0) {
         placed.add(index);
-        items.push({ kind: "spot", index });
+        items.push({ kind: "spot", index, num: index + 1 });
       }
     }
   }
   day.spots.forEach((_, index) => {
-    if (!placed.has(index)) items.push({ kind: "spot", index });
+    if (!placed.has(index)) items.push({ kind: "spot", index, num: index + 1 });
   });
   return items;
 }
 
-function RideCard({ ride, onOpenSpot }: { ride: Ride; onOpenSpot?: (spotName: string) => void }) {
+function RideCard({ ride, onOpenRide }: { ride: Ride; onOpenRide?: (ride: Ride) => void }) {
   const line = [ride.detail, ride.price].filter(Boolean).join(" · ");
   const [open, setOpen] = useState(false);
-  const openable = Boolean(ride.spot && onOpenSpot);
+  const openable = Boolean((ride.entry || ride.spot) && onOpenRide);
   const longNote = ride.note.length > 36;
   return (
     <div className={openable ? "leg openable" : "leg"}>
-      <button className="leg-main" type="button" disabled={!openable} onClick={() => openable && onOpenSpot?.(ride.spot)}>
+      <button className="leg-main" type="button" disabled={!openable} onClick={() => openable && onOpenRide?.(ride)}>
         <span className="mode">{ride.mode || "前往"}</span>
         <span>
           <strong>
