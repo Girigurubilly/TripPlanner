@@ -186,14 +186,20 @@ export function spendOnDay(trip: TripBook, day: TripDay): SpendItem[] {
   return items.slice(0, 20);
 }
 
-export function encodeProposal(body: { trip: string; tripId: string; items: SpendItem[] }): string {
-  const json = JSON.stringify({ v: 1, trip: body.trip.slice(0, 80), tripId: body.tripId.slice(0, 80), items: body.items.slice(0, 20) });
+export function encodeProposal(body: { trip: string; tripId: string; bookId?: string; items: SpendItem[] }): string {
+  const json = JSON.stringify({
+    v: 1,
+    trip: body.trip.slice(0, 80),
+    tripId: body.tripId.slice(0, 80),
+    bookId: (body.bookId || "").slice(0, 80),
+    items: body.items.slice(0, 20),
+  });
   const bytes = new TextEncoder().encode(json);
   let bin = "";
   for (const b of bytes) bin += String.fromCharCode(b);
   return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
 }
 
-export function moneySpendUrl(body: { trip: string; tripId: string; items: SpendItem[] }): string {
+export function moneySpendUrl(body: { trip: string; tripId: string; bookId?: string; items: SpendItem[] }): string {
   return `${MONEY_URL}#proposal=${encodeProposal(body)}`;
 }

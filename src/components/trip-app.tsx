@@ -1993,7 +1993,7 @@ function SpotMoney({
   return (
     <a
       className={compact ? "money-spot" : "btn primary money-send"}
-      href={moneySpendUrl({ trip: trip.title, tripId: moneyTripIdForBook(trip.id), items: [item] })}
+      href={moneySpendUrl({ trip: trip.title, tripId: moneyTripIdForBook(trip.id), bookId: trip.id, items: [item] })}
       target="_blank"
       rel="noopener noreferrer"
       onClick={(event) => event.stopPropagation()}
