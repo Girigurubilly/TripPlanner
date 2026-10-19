@@ -1,11 +1,10 @@
-const FILE_NAME = "trip-book.json";
-const FOLDER_NAME = "行程書";
-const FILE_SCOPE = "https://www.googleapis.com/auth/drive.file";
+const FILE_NAME = "hk-life-trip.backup.json";
+const FOLDER_NAME = "HK Life Money";
 const SHARE_SCOPE = "https://www.googleapis.com/auth/drive";
 const CLIENT_KEY = "tripbook-google-client-id";
 const DEFAULT_GOOGLE_CLIENT_ID = "214174071830-9t6rvidpsa16qgeminojphr5tld9vmq2.apps.googleusercontent.com";
-const FOLDER_ID_KEY = "tripbook-drive-folder-id";
-const FILE_ID_KEY = "tripbook-drive-file-id";
+const FOLDER_ID_KEY = "hk-life-trip-folder-id";
+const FILE_ID_KEY = "hk-life-trip-file-id";
 const ACTION_KEY = "tripbook-drive-action";
 const TOKEN_KEY = "tripbook-drive-token";
 const TOKEN_EXP_KEY = "tripbook-drive-token-exp";
@@ -44,7 +43,7 @@ export function writeShareScope(on: boolean) {
 }
 
 function scope(): string {
-  return shareScopeEnabled() ? SHARE_SCOPE : FILE_SCOPE;
+  return SHARE_SCOPE;
 }
 
 function readStored(key: string): string {

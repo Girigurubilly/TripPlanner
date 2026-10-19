@@ -1,5 +1,6 @@
 import {
   downloadTripFile,
+  clearAccessToken,
   readGoogleClientId,
   rememberAccessToken,
   requestSilentToken,
@@ -62,13 +63,14 @@ export type TripSnapshot = {
   visits?: VisitMap;
   extras?: ExtraMap;
   wishes?: WishMap;
+  links?: Record<string, string>;
 };
 
 export type SyncResult = "pulled" | "pushed" | "ok" | "offline" | "need-auth" | "need-pass" | "missing" | "fail";
 
 export function readDrivePass(): string {
   try {
-    return localStorage.getItem(PASS_KEY) ?? "";
+    return localStorage.getItem(PASS_KEY) || localStorage.getItem("hk-life-money-drive-pass") || "";
   } catch {
     return "";
   }
@@ -94,7 +96,18 @@ export function exportSnapshot(): TripSnapshot {
     visits: exportVisits(),
     extras: exportExtras(),
     wishes: exportWishes(),
+    links: readLinks(),
   };
+}
+
+function readLinks(): Record<string, string> {
+  try {
+    const parsed = JSON.parse(localStorage.getItem("tripbook-money-links") || "{}") as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    return parsed as Record<string, string>;
+  } catch {
+    return {};
+  }
 }
 
 async function deriveKey(password: string, salt: Uint8Array) {
@@ -185,7 +198,13 @@ export async function syncTripDrive(): Promise<SyncResult> {
   try {
     remote = await downloadTripFile(token);
   } catch (err) {
-    if ((err as Error).message !== "missing") return "fail";
+    const msg = (err as Error).message;
+    if (msg === "missing") {
+      /* first copy is created below */
+    } else if (msg === "auth" || msg.includes("403")) {
+      clearAccessToken();
+      return "need-auth";
+    } else return "fail";
   }
 
   if (!remote) {
@@ -220,6 +239,7 @@ export async function syncTripDrive(): Promise<SyncResult> {
       decoded.extras,
       decoded.wishes,
     );
+    if (decoded.links) localStorage.setItem("tripbook-money-links", JSON.stringify(decoded.links));
     return "pulled";
   }
   return "ok";

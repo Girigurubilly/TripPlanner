@@ -69,7 +69,7 @@ import { DrivePanel } from "@/components/drive-panel";
 import { syncTripDriveIfDue } from "@/lib/drive-sync";
 import { AI_TRIP_PROMPT, wishUpdatePrompt } from "@/lib/ai-prompt";
 import { dayIdForDate, loadMoneyLinks, moneyLinkBackUrl, moneySpendUrl, moneyTripIdForBook, rankTripBooks, readMoneyRef, rememberMoneyRef, saveMoneyLink, spendItem, type MoneyTripRef } from "@/lib/money-link";
-import { startLocate, type PlaceFix } from "@/lib/geo";
+import { placeFromMaps } from "@/lib/maps-place";
 
 const TAB_ICON: Record<string, LucideIcon> = {
   overview: BookOpen,
@@ -2369,7 +2369,20 @@ function WishPlaces({ trip, day }: { trip: TripBook; day: TripDay }) {
           refresh();
         }}
       >
-        <input value={name} placeholder="店名或景點" aria-label="店名或景點" onChange={(event) => setName(event.target.value)} />
+        <input
+          value={name}
+          placeholder="店名，或者貼 Google 地圖連結"
+          aria-label="店名或景點"
+          onChange={(event) => {
+            const parsed = placeFromMaps(event.target.value);
+            if (!parsed) {
+              setName(event.target.value);
+              return;
+            }
+            setName(parsed.name);
+            if (parsed.note) setNote(parsed.note);
+          }}
+        />
         <input value={note} placeholder="可選：點解要去、附近邊度" aria-label="備註" onChange={(event) => setNote(event.target.value)} />
         <button className="btn primary" type="submit" disabled={!name.trim()}>
           加入呢日

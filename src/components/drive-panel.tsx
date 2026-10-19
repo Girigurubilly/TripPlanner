@@ -153,8 +153,8 @@ export function DrivePanel({ onLibraryChange }: { onLibraryChange: () => void })
       </summary>
       <div className="drive-body">
         <p className="tiny">
-          Google Client ID 已內置。行程同筆記會加密後放到 Google Drive 一個檔案
-          <code>行程書/trip-book.json</code>。
+          Google Client ID 已內置。行程同筆記會加密後放到理財 App 同一個資料夾
+          <code>HK Life Money/hk-life-trip.backup.json</code>。密碼要同理財 App 的 Drive 密碼一樣，主畫面兩個圖示先睇到同一份。
         </p>
         <label className="drive-field">
           加密密碼
@@ -163,7 +163,7 @@ export function DrivePanel({ onLibraryChange }: { onLibraryChange: () => void })
             onChange={(event) => setPassword(event.target.value)}
             type="password"
             autoComplete="off"
-            placeholder="兩部機要一樣"
+            placeholder="同理財 App 的 Drive 密碼"
           />
         </label>
         <p className="tiny">
