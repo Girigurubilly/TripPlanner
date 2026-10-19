@@ -280,6 +280,7 @@ export function TripApp() {
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
+    window.name = "trip-planner";
     const stored = loadTrips();
     const ui = loadUi();
     setTrips(stored);
@@ -2055,6 +2056,8 @@ function SpotMoney({
     <a
       className={compact ? "money-spot" : "btn primary money-send"}
       href={moneySpendUrl({ trip: trip.title, tripId: moneyTripIdForBook(trip.id), items: [item] })}
+      target="_blank"
+      rel="noopener noreferrer"
       onClick={(event) => event.stopPropagation()}
     >
       {compact ? "入帳" : "將呢項交去理財確認"}
