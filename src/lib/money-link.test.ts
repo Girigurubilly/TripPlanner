@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { moneySpendUrl, parsePrice, rankTripBooks, readMoneyRef, spendOnDay } from "./money-link.ts";
+import { moneyLinkBackUrl, moneySpendUrl, parsePrice, rankTripBooks, readMoneyRef, spendOnDay } from "./money-link.ts";
 import type { TripBook } from "./trip.ts";
 
 function book(patch: Partial<TripBook> & Pick<TripBook, "id" | "title">): TripBook {
@@ -32,14 +32,15 @@ describe("money link", () => {
   });
 
   it("reads the money trip from the query", () => {
-    const ref = readMoneyRef("?money=osaka&name=大阪&dest=大阪&start=2026-04-02&end=2026-04-08");
+    const ref = readMoneyRef("?money=osaka&name=大阪&dest=大阪&start=2026-04-02&end=2026-04-08&pick=1");
     assert.equal(ref?.id, "osaka");
-    assert.equal(ref?.start, "2026-04-02");
+    assert.equal(ref?.pick, true);
+    assert.match(moneyLinkBackUrl(ref!, "osaka-book", "大阪散步"), /^https:\/\/girigurubilly\.github\.io\/MoneyTracker\/#link=/);
   });
 
   it("picks the book whose dates overlap that trip", () => {
     const other = book({ id: "madrid", title: "馬德里", subtitle: "2025", days: [{ ...osaka.days[0], id: "m", label: "5月2日", city: "madrid" }] });
-    const ranked = rankTripBooks([other, osaka], { id: "osaka", name: "大阪", dest: "大阪", start: "2026-04-02", end: "2026-04-08", book: "" }, {});
+    const ranked = rankTripBooks([other, osaka], { id: "osaka", name: "大阪", dest: "大阪", start: "2026-04-02", end: "2026-04-08", book: "", pick: false }, {});
     assert.equal(ranked.best?.id, "osaka-book");
   });
 

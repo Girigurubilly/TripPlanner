@@ -60,7 +60,7 @@ import {
 import { DrivePanel } from "@/components/drive-panel";
 import { syncTripDriveIfDue } from "@/lib/drive-sync";
 import { AI_TRIP_PROMPT } from "@/lib/ai-prompt";
-import { loadMoneyLinks, moneySpendUrl, moneyTripIdForBook, rankTripBooks, readMoneyRef, rememberMoneyRef, saveMoneyLink, spendOnDay, type MoneyTripRef } from "@/lib/money-link";
+import { loadMoneyLinks, moneyLinkBackUrl, moneySpendUrl, moneyTripIdForBook, rankTripBooks, readMoneyRef, rememberMoneyRef, saveMoneyLink, spendOnDay, type MoneyTripRef } from "@/lib/money-link";
 import { startLocate, type PlaceFix } from "@/lib/geo";
 
 const TAB_ICON: Record<string, LucideIcon> = {
@@ -269,7 +269,14 @@ export function TripApp() {
       window.location.hash.includes("access_token") || window.location.hash.includes("error=");
     const money = returning ? null : readMoneyRef(window.location.search);
     const live = stored.find((trip) => todayDay(trip));
-    if (money) {
+    if (money?.pick) {
+      rememberMoneyRef(money);
+      setMoneyAsk(money);
+      setStatus("揀邊一個行程書係呢趟。揀完會寫返理財 App。");
+      const url = new URL(window.location.href);
+      for (const key of ["money", "start", "end", "name", "dest", "book", "pick"]) url.searchParams.delete(key);
+      window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+    } else if (money) {
       rememberMoneyRef(money);
       const ranked = rankTripBooks(stored, money, loadMoneyLinks());
       if (ranked.best) {
@@ -285,7 +292,7 @@ export function TripApp() {
         setStatus(stored.length ? "揀邊一個行程書係呢趟。" : "呢部機未有行程。上傳之後再配對。");
       }
       const url = new URL(window.location.href);
-      for (const key of ["money", "start", "end", "name", "dest", "book"]) url.searchParams.delete(key);
+      for (const key of ["money", "start", "end", "name", "dest", "book", "pick"]) url.searchParams.delete(key);
       window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
     } else if (!returning && live) {
       setOpenId(live.id);
@@ -451,6 +458,10 @@ export function TripApp() {
                         ? () => {
                             saveMoneyLink(moneyAsk.id, trip.id);
                             rememberMoneyRef({ ...moneyAsk, book: trip.id });
+                            if (moneyAsk.pick) {
+                              window.location.assign(moneyLinkBackUrl(moneyAsk, trip.id, trip.title));
+                              return;
+                            }
                             setMoneyAsk(null);
                             const today = todayDay(trip);
                             setOpenId(trip.id);
@@ -533,6 +544,7 @@ function TripCard({
             </span>
           ) : null}
           <span className="muted">{tripStats(trip)}</span>
+          {onPick ? <span className="muted">編號 {trip.id}</span> : null}
           {timingLabel(tripTiming(trip)) ? <span className="when">{timingLabel(tripTiming(trip))}</span> : null}
           {progress.total ? <span className="muted">已訂 {progress.done}／{progress.total}</span> : null}
         </span>

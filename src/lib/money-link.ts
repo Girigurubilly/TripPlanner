@@ -11,6 +11,7 @@ export type MoneyTripRef = {
   start: string;
   end: string;
   book: string;
+  pick: boolean;
 };
 
 export type SpendItem = {
@@ -31,6 +32,7 @@ export function readMoneyRef(search: string): MoneyTripRef | null {
     start: (q.get("start") || "").slice(0, 10),
     end: (q.get("end") || "").slice(0, 10),
     book: (q.get("book") || "").slice(0, 80),
+    pick: q.get("pick") === "1",
   };
 }
 
@@ -52,6 +54,18 @@ export function saveMoneyLink(moneyId: string, bookId: string): void {
 
 export function rememberMoneyRef(ref: MoneyTripRef): void {
   localStorage.setItem(REF_KEY, JSON.stringify(ref));
+}
+
+export function moneyLinkBackUrl(ref: MoneyTripRef, bookId: string, title: string): string {
+  const json = JSON.stringify({ v: 1, tripId: ref.id.slice(0, 80), bookId: bookId.slice(0, 80), title: title.slice(0, 80) });
+  return `${MONEY_URL}#link=${encodeToken(json)}`;
+}
+
+function encodeToken(json: string): string {
+  const bytes = new TextEncoder().encode(json);
+  let bin = "";
+  for (const b of bytes) bin += String.fromCharCode(b);
+  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
 }
 
 export function moneyTripIdForBook(bookId: string): string {
