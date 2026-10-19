@@ -26,8 +26,8 @@ describe("money link", () => {
     title: "大阪散步",
     subtitle: "2026",
     days: [
-      { id: "d1", city: "osaka", label: "4月2日", title: "抵達", leadHtml: "", walkHtml: "", foodHtml: "", noteHtml: "", sun: { sunrise: "", sunset: "", sunriseCity: "", sunsetCity: "" }, meals: [], rides: [{ from: "關西", to: "難波", mode: "電車", detail: "南海", price: "¥930", note: "", spot: "" }], images: [], spots: [{ name: "通天閣", badge: "", tone: "", hours: "", address: "", price: "¥800", image: "", refLink: "", refLabel: "", html: "" }] },
-      { id: "d2", city: "osaka", label: "4月8日", title: "回程", leadHtml: "", walkHtml: "", foodHtml: "", noteHtml: "", sun: { sunrise: "", sunset: "", sunriseCity: "", sunsetCity: "" }, meals: [], rides: [], images: [], spots: [] },
+      { id: "d1", city: "osaka", label: "4月2日", title: "抵達", leadHtml: "", walkHtml: "", foodHtml: "", noteHtml: "", sun: { sunrise: "", sunset: "", sunriseCity: "", sunsetCity: "" }, meals: [], rides: [{ from: "關西", to: "難波", mode: "電車", detail: "南海", price: "¥930", note: "", spot: "", entry: "" }], images: [], spots: [{ id: "d1-sight-1", name: "通天閣", badge: "", tone: "", hours: "", address: "", price: "¥800", image: "", refLink: "", refLabel: "", html: "" }], timeline: [] },
+      { id: "d2", city: "osaka", label: "4月8日", title: "回程", leadHtml: "", walkHtml: "", foodHtml: "", noteHtml: "", sun: { sunrise: "", sunset: "", sunriseCity: "", sunsetCity: "" }, meals: [], rides: [], images: [], spots: [], timeline: [] },
     ],
   });
 
