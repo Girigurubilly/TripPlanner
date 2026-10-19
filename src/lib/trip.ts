@@ -5,7 +5,7 @@ export type TripImage = {
   caption: string;
 };
 
-import { canMap, cityCenter, cityKeyFor, mapQuery } from "./geocode.ts";
+import { canMap, cityCenter, cityKeyFor, mapQuery, townOfAddress } from "./geocode.ts";
 
 export type TripSpot = {
   /** Stable id, e.g. "dec18-sight-1". Synthesized at parse time when the JSON omits it. */
@@ -1814,6 +1814,12 @@ export type MapEntryTarget = {
   kind: "spot" | "meal" | "hotel";
   name: string;
   query: string | null;
+  /** Further queries to try when the primary one yields no believable
+   *  result, in order: the place name, then the bare town (町/新地).
+   *  Different entries resolve best by different queries (a temple by
+   *  name, a mall shop by building address), so the map tries each
+   *  rather than pinning a wrong first guess. */
+  fallbackQueries: string[];
   bias: { lat: number; lng: number } | null;
 };
 
@@ -1829,13 +1835,26 @@ export function mapEntryTargets(day: TripDay): MapEntryTarget[] {
       item.kind === "meal" ? record.address || (record as TripMeal).place || record.name : record.address || record.name;
     const name = item.kind === "meal" ? (record as TripMeal).place || record.name : record.name;
     const cityKey = cityKeyFor(base, day.city);
+    if (!canMap(base)) {
+      return [{ entry: { kind: item.kind, index: item.index }, num: item.num, kind: item.kind, name, query: null, fallbackQueries: [], bias: cityCenter(cityKey) }];
+    }
+    // Primary: the recorded street address when one exists (mall shops
+    // resolve by building); fallbacks: the place name (temples, castles,
+    // hotels resolve by name), then the bare town (Photon chokes on
+    // some Japanese house numbers and full prefixed addresses).
+    const addressQuery = record.address ? mapQuery(record.address, cityKey) : null;
+    const nameQuery = mapQuery(name, cityKey);
+    const town = record.address ? townOfAddress(record.address) : null;
+    const townQuery = town ? mapQuery(town, cityKey) : null;
+    const queries = [...new Set([addressQuery, nameQuery, townQuery].filter((q): q is string => Boolean(q)))];
     return [
       {
         entry: { kind: item.kind, index: item.index },
         num: item.num,
         kind: item.kind,
         name,
-        query: canMap(base) ? mapQuery(base, cityKey) : null,
+        query: queries[0] ?? null,
+        fallbackQueries: queries.slice(1),
         bias: cityCenter(cityKey),
       },
     ];

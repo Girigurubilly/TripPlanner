@@ -148,4 +148,38 @@ describe("mapEntryTargets", () => {
       ],
     );
   });
+
+  it("Osaka entries get fallback queries: address, then name, then town without house number", () => {
+    const input = day({
+      id: "oct31",
+      city: "osaka",
+      spots: [spot({ id: "oct31-sight-1", name: "大阪城公園／天守閣", address: "中央區大阪城1-1；JR環狀線 大阪城公園站" })],
+      hotels: [
+        hotel({ id: "oct31-hotel-1", name: "HOTEL MYSTAYS PREMIER Dojima（返酒店）", address: "大阪市北區曽根崎新地 2-4-1（堂島一帶）" }),
+      ],
+      timeline: ["oct31-sight-1", "oct31-hotel-1"],
+    });
+    const [castle, hotelTarget] = mapEntryTargets(input);
+    assert.equal(castle.query, "中央区大阪城1-1, Osaka, Japan");
+    assert.deepEqual(castle.fallbackQueries, ["大阪城公園 天守閣, Osaka, Japan", "大阪城, Osaka, Japan"]);
+    assert.equal(hotelTarget.query, "大阪市北区曽根崎新地 2-4-1, Osaka, Japan");
+    assert.deepEqual(hotelTarget.fallbackQueries, [
+      "HOTEL MYSTAYS PREMIER Dojima, Osaka, Japan",
+      "曽根崎新地, Osaka, Japan",
+    ]);
+  });
+
+  it("ARCHI gets a town-only fallback: Photon chokes on the full house number", () => {
+    const input = day({
+      id: "nov1",
+      city: "kyoto",
+      meals: [
+        meal({ id: "nov1-meal-1", place: "ARCHI coffee and wine", address: "京都市中京區壬生高樋町65-21（Hankyu 西院站步行約10–13分鐘）" }),
+      ],
+      timeline: ["nov1-meal-1"],
+    });
+    const [target] = mapEntryTargets(input);
+    assert.equal(target.query, "京都市中京区壬生高樋町65-21, Kyoto, Japan");
+    assert.deepEqual(target.fallbackQueries, ["ARCHI coffee and wine, Kyoto, Japan", "壬生高樋町, Kyoto, Japan"]);
+  });
 });

@@ -3,7 +3,7 @@ import "leaflet/dist/leaflet.css";
 import type { LayerGroup, Map as LeafletMap } from "leaflet";
 import type { DayEntry, ExtraStop, TripBook, TripDay } from "../lib/trip";
 import { cityLabel, loadExtras, mapEntryTargets } from "../lib/trip";
-import { cityCenter, geocode, type GeoPoint } from "../lib/geocode";
+import { cityCenter, geocodeFirst, type GeoPoint } from "../lib/geocode";
 
 type Pin = {
   entry: DayEntry;
@@ -67,7 +67,9 @@ export function TripMap({
         if (stop) return;
         // Per-entry bias: a Florence entry on a Milan-start day must be
         // geocoded against Florence, or the bias guard rejects it.
-        const point = await geocode(target.query!, target.bias);
+        // Tries the entry's candidate queries in order (address, name,
+        // town) and takes the first believable result.
+        const point = await geocodeFirst([target.query!, ...target.fallbackQueries], target.bias);
         if (stop) return;
         setPins((current) =>
           current.map((pin) =>

@@ -2084,8 +2084,11 @@ a.stamp {
   font-weight: 700;
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
 }
+/* Selected pin keeps its kind colour (orange == meal, always) and gets
+   a ring instead — previously the selected pin turned orange, making a
+   selected sight indistinguishable from a meal pin. */
 .map-pin.on span {
-  background: var(--accent);
+  box-shadow: 0 0 0 3px #fff, 0 0 0 5px var(--accent), 0 2px 6px rgba(0, 0, 0, 0.25);
 }
 .map-pin.extra span {
   background: var(--teal);
