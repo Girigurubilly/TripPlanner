@@ -17,4 +17,14 @@ describe("maps place", () => {
   it("ignores a plain shop name", () => {
     assert.equal(placeFromMaps("黑門市場"), null);
   });
+
+  it("reads the shop name at the end of a Google short-link address", () => {
+    const q = "日本〒530-0012 Osaka, Kita Ward, Shibata, 1 Chome−15−21 1階 BOUL'ANGE 大阪梅田店";
+    const parsed = placeFromMaps(`https://maps.google.com?q=${encodeURIComponent(q)}`);
+    assert.equal(parsed?.name, "BOUL'ANGE 大阪梅田店");
+  });
+
+  it("does not invent a name from a short link alone", () => {
+    assert.equal(placeFromMaps("https://maps.app.goo.gl/Pp9UuxmR11tnVqe79?g_st=ic"), null);
+  });
 });

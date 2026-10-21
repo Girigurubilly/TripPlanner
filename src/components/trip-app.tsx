@@ -69,7 +69,7 @@ import { DrivePanel } from "@/components/drive-panel";
 import { syncTripDriveIfDue } from "@/lib/drive-sync";
 import { AI_TRIP_PROMPT, wishUpdatePrompt } from "@/lib/ai-prompt";
 import { dayIdForDate, loadMoneyLinks, moneyLinkBackUrl, moneySpendUrl, moneyTripIdForBook, rankTripBooks, readMoneyRef, rememberMoneyRef, saveMoneyLink, spendItem, type MoneyTripRef } from "@/lib/money-link";
-import { placeFromMaps } from "@/lib/maps-place";
+import { placeFromMaps, resolveMapsPlace, shortMapsLink } from "@/lib/maps-place";
 
 const TAB_ICON: Record<string, LucideIcon> = {
   overview: BookOpen,
@@ -2313,6 +2313,7 @@ function WishPlaces({ trip, day }: { trip: TripBook; day: TripDay }) {
   const [note, setNote] = useState("");
   const [fallback, setFallback] = useState("");
   const [copied, setCopied] = useState(false);
+  const [reading, setReading] = useState("");
   const dayRows = rows.filter((row) => row.dayId === day.id);
 
   useEffect(() => {
@@ -2374,15 +2375,32 @@ function WishPlaces({ trip, day }: { trip: TripBook; day: TripDay }) {
           placeholder="店名，或者貼 Google 地圖連結"
           aria-label="店名或景點"
           onChange={(event) => {
-            const parsed = placeFromMaps(event.target.value);
-            if (!parsed) {
-              setName(event.target.value);
+            const value = event.target.value;
+            const parsed = placeFromMaps(value);
+            if (parsed?.name) {
+              setReading("");
+              setName(parsed.name);
+              if (parsed.note) setNote(parsed.note);
               return;
             }
-            setName(parsed.name);
-            if (parsed.note) setNote(parsed.note);
+            setName(value);
+            const short = shortMapsLink(value);
+            if (!short) {
+              setReading("");
+              return;
+            }
+            setReading("讀緊地名…");
+            void resolveMapsPlace(value).then((found) => {
+              setName((current) => {
+                if (current !== value && shortMapsLink(current) !== short) return current;
+                setReading(found?.name ? "" : "短連結讀唔到店名，請打返個名");
+                return found?.name || current;
+              });
+              if (found?.note) setNote((current) => current || found.note);
+            });
           }}
         />
+        {reading ? <p className="tiny">{reading}</p> : null}
         <input value={note} placeholder="可選：點解要去、附近邊度" aria-label="備註" onChange={(event) => setNote(event.target.value)} />
         <button className="btn primary" type="submit" disabled={!name.trim()}>
           加入呢日
