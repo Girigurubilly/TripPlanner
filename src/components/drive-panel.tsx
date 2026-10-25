@@ -63,7 +63,7 @@ export function DrivePanel({ onLibraryChange }: { onLibraryChange: () => void })
       if (action === "share") {
         const who = email.trim();
         if (!who.includes("@")) {
-          setMessage("請輸入老婆嘅 Gmail。");
+          setMessage("請輸入對方嘅 Gmail。");
           return;
         }
         const synced = await syncTripDrive();
@@ -82,7 +82,7 @@ export function DrivePanel({ onLibraryChange }: { onLibraryChange: () => void })
         const id = await shareTripFile(token, who);
         setFileId(id);
         if (synced === "pulled") onLibraryChange();
-        setMessage(`已共享。請老婆喺佢部機貼上檔案 ID：${id}`);
+        setMessage(`已共享。請對方喺另一部機貼上檔案 ID：${id}`);
         return;
       }
       const result = await syncTripDrive();
@@ -127,7 +127,7 @@ export function DrivePanel({ onLibraryChange }: { onLibraryChange: () => void })
       return;
     }
     if (!password.trim()) {
-      setMessage("請設定密碼。檔案會加密，老婆部機要打同一組。");
+      setMessage("請設定密碼。檔案會加密，另一部機要打同一組。");
       return;
     }
     setBusy(true);
@@ -152,9 +152,18 @@ export function DrivePanel({ onLibraryChange }: { onLibraryChange: () => void })
         Google Drive 同步
       </summary>
       <div className="drive-body">
+        <p className="drive-status-line">
+          {(() => {
+            try {
+              const day = localStorage.getItem("tripbook-drive-daily");
+              return day ? `本機為準 · 最近自動同步標記：${day}` : "本機為準 · 尚未自動同步過 Drive";
+            } catch {
+              return "本機為準";
+            }
+          })()}
+        </p>
         <p className="tiny">
-          Google Client ID 已內置。行程同筆記會加密後放到理財 App 同一個資料夾
-          <code>HK Life Money/hk-life-trip.backup.json</code>。密碼要同理財 App 的 Drive 密碼一樣，主畫面兩個圖示先睇到同一份。
+          可選：將行程加密備份到 Google Drive（同理財 App 同一個資料夾）。密碼要同理財 App 的 Drive 密碼一樣，兩部機先睇到同一份。
         </p>
         <label className="drive-field">
           加密密碼
@@ -166,8 +175,8 @@ export function DrivePanel({ onLibraryChange }: { onLibraryChange: () => void })
             placeholder="同理財 App 的 Drive 密碼"
           />
         </label>
-        <p className="tiny">
-          Redirect URI 要加到 Google Cloud：<code>{typeof window === "undefined" ? "" : redirectUri()}</code>
+        <p className="tiny muted-tech">
+          進階：Redirect URI <code>{typeof window === "undefined" ? "" : redirectUri()}</code>
         </p>
         <button className="btn primary" type="button" disabled={busy} onClick={() => void begin("sync")}>
           {busy ? "處理緊…" : "同步呢部機"}
@@ -185,11 +194,10 @@ export function DrivePanel({ onLibraryChange }: { onLibraryChange: () => void })
           同另一個 Google 帳號共用
         </label>
         <p className="tiny">
-          你同老婆唔同 Gmail 先需要開。Google 可能話呢個 app 未驗證，撳進階再繼續。兩邊都開呢個選項，用同一個
-          密碼同檔案 ID。
+          兩部機用唔同 Google 帳號先需要開。Google 可能話呢個 app 未驗證，撳進階再繼續。兩邊用同一個密碼同檔案 ID。
         </p>
         <label className="drive-field">
-          老婆 Gmail
+          對方 Gmail
           <input
             value={email}
             onChange={(event) => setEmail(event.target.value)}
@@ -207,7 +215,7 @@ export function DrivePanel({ onLibraryChange }: { onLibraryChange: () => void })
             value={fileId}
             onChange={(event) => setFileId(event.target.value)}
             autoComplete="off"
-            placeholder="同步後會出現，老婆部機貼上"
+            placeholder="同步後會出現，另一部機貼上"
           />
         </label>
         {message ? <p className="status">{message}</p> : null}

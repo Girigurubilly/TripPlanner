@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import "leaflet/dist/leaflet.css";
 import type { LayerGroup, Map as LeafletMap } from "leaflet";
 import type { DayEntry, ExtraStop, TripBook, TripDay } from "../lib/trip";
-import { cityLabel, loadExtras, mapEntryTargets } from "../lib/trip";
+import { cityLabel, dayChipParts, loadExtras, mapEntryTargets } from "../lib/trip";
 import { cityCenter, geocodeFirst, type GeoPoint } from "../lib/geocode";
 
 type Pin = {
@@ -165,12 +165,15 @@ export function TripMap({
 
   const placed = pins.filter((pin) => pin.point);
   const current = pins[active] || pins[0];
+  // Offer Google route whenever at least one pin resolved; one miss must not hide the day route.
   const route =
-    placed.length > 1
-      ? `https://www.google.com/maps/dir/?api=1&travelmode=walking&origin=${placed[0].point!.lat},${placed[0].point!.lng}&destination=${placed[placed.length - 1].point!.lat},${placed[placed.length - 1].point!.lng}&waypoints=${placed
-          .slice(1, -1)
-          .map((pin) => `${pin.point!.lat},${pin.point!.lng}`)
-          .join("|")}`
+    placed.length >= 1
+      ? placed.length === 1
+        ? `https://www.google.com/maps/search/?api=1&query=${placed[0].point!.lat},${placed[0].point!.lng}`
+        : `https://www.google.com/maps/dir/?api=1&travelmode=walking&origin=${placed[0].point!.lat},${placed[0].point!.lng}&destination=${placed[placed.length - 1].point!.lat},${placed[placed.length - 1].point!.lng}&waypoints=${placed
+            .slice(1, -1)
+            .map((pin) => `${pin.point!.lat},${pin.point!.lng}`)
+            .join("|")}`
       : "";
 
   return (
@@ -211,7 +214,8 @@ export function TripMap({
               <button
                 key={`${pin.kind}-${pin.entry.index}`}
                 type="button"
-                className={pinIndex === active ? "on" : ""}
+                className={`${pinIndex === active ? "on" : ""}${pin.point ? "" : " miss"}`}
+                title={pin.point ? pin.name : `${pin.name}（搵唔到位置）`}
                 onClick={() => {
                   follow.current = false;
                   setActive(pinIndex);
@@ -224,8 +228,10 @@ export function TripMap({
         ) : null}
         {route ? (
           <a className="btn primary nav-go" href={route} target="_blank" rel="noopener">
-            用 Google 地圖行晒今日
+            {placed.length === 1 ? "用 Google 地圖睇呢個點" : "用 Google 地圖行晒今日"}
           </a>
+        ) : pending ? null : pins.some((pin) => pin.query) ? (
+          <p className="tiny">今日未有成功定位嘅點，暫時開唔到 Google 路線。</p>
         ) : null}
       </div>
     </section>
@@ -233,10 +239,5 @@ export function TripMap({
 }
 
 function dayChip(day: TripDay): { num: string; hint: string } {
-  const num = day.label.match(/(\d{1,2})/)?.[1] ?? day.label.slice(0, 2);
-  if (day.label.includes("聖誕")) return { num, hint: "聖誕" };
-  if (day.label.includes("返")) return { num, hint: "回程" };
-  const inside = day.label.match(/（([^）]+)）/)?.[1] ?? "";
-  const mark = inside.match(/[一二三四五六日]/)?.[0];
-  return { num, hint: mark ? `週${mark}` : inside || cityLabel(day.city) };
+  return dayChipParts(day);
 }
