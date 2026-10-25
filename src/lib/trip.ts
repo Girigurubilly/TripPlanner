@@ -158,6 +158,18 @@ const CITY_LABEL: Record<string, string> = {
   florence: "佛羅倫斯",
   firenze: "佛羅倫斯",
   madrid: "馬德里",
+  barcelona: "巴塞隆拿",
+  lisbon: "里斯本",
+  lisboa: "里斯本",
+  porto: "波爾圖",
+  rome: "羅馬",
+  roma: "羅馬",
+  paris: "巴黎",
+  london: "倫敦",
+  seoul: "首爾",
+  taipei: "台北",
+  bangkok: "曼谷",
+  singapore: "新加坡",
   osaka: "大阪",
   kyoto: "京都",
   tokyo: "東京",
@@ -175,9 +187,29 @@ const EDIT_KEY = "tripbook-local-edited";
 export type NoteMap = Record<string, Record<string, string>>;
 
 export function cityLabel(city: string): string {
-  const key = city.trim().toLowerCase();
+  const raw = city.trim();
+  if (!raw) return "";
+  if (/[\u4e00-\u9fff]/.test(raw)) return raw;
+  const key = raw.toLowerCase().replace(/\s+/g, "");
   if (CITY_LABEL[key]) return CITY_LABEL[key];
-  return city.trim();
+  return raw;
+}
+
+/** Day-of-month for chips: prefer the number AFTER month/day slash (4/2 → 2). */
+export function dayChipParts(day: { label: string; city: string }): { num: string; hint: string } {
+  const slash = day.label.match(/(\d{1,2})\s*[/／.\-]\s*(\d{1,2})/);
+  const cn = day.label.match(/(\d{1,2})\s*月\s*(\d{1,2})/);
+  const num =
+    slash?.[2] ??
+    cn?.[2] ??
+    day.label.match(/(?:Day|day|D|第)\s*(\d{1,2})/)?.[1] ??
+    day.label.match(/(\d{1,2})/)?.[1] ??
+    day.label.slice(0, 2);
+  if (day.label.includes("聖誕")) return { num, hint: "聖誕" };
+  if (day.label.includes("返")) return { num, hint: "回程" };
+  const inside = day.label.match(/（([^）]+)）/)?.[1] ?? "";
+  const mark = inside.match(/[一二三四五六日]/)?.[0];
+  return { num, hint: mark ? `週${mark}` : inside || cityLabel(day.city) };
 }
 
 export function cleanCredit(value: string): string {
@@ -208,8 +240,12 @@ export function tidyRoot(root: HTMLElement) {
 export function tripStats(trip: TripBook): string {
   const cities = [...new Set(trip.days.map((day) => day.city).filter(Boolean))];
   const spots = trip.days.reduce((sum, day) => sum + day.spots.length, 0);
+  const meals = trip.days.reduce((sum, day) => sum + day.meals.length, 0);
+  const hotels = trip.days.reduce((sum, day) => sum + day.hotels.length, 0);
   const place = cities.map(cityLabel).join(" → ");
   const bits = [`${trip.days.length} 日`, `${spots} 個景點`];
+  if (meals) bits.push(`${meals} 餐`);
+  if (hotels) bits.push(`${hotels} 住宿`);
   if (place) bits.unshift(place);
   return bits.join(" · ");
 }
@@ -1030,6 +1066,10 @@ function attachRides(days: TripDay[], blocks: { heading: string; html: string }[
 }
 
 export function dayKey(value: string): string {
+  const slash = value.match(/(\d{1,2})\s*[/／.\-]\s*(\d{1,2})/);
+  if (slash) return `m${Number(slash[1])}d${Number(slash[2])}`;
+  const cn = value.match(/(\d{1,2})\s*月\s*(\d{1,2})/);
+  if (cn) return `m${Number(cn[1])}d${Number(cn[2])}`;
   const matched = value.match(/([A-Za-z]+)\s*(\d{1,2})/);
   if (!matched) return "";
   return `${matched[1].toLowerCase()}${Number(matched[2])}`;
@@ -1665,6 +1705,7 @@ export function absorbSaved(text: string): void {
   const checks = readCheckMap();
   const visits = readVisitMap();
   const extras = readExtraMap();
+  const wishes = readWishMap();
   let changed = false;
   for (const item of list) {
     if (!item || typeof item !== "object") continue;
@@ -1692,12 +1733,20 @@ export function absorbSaved(text: string): void {
       });
       changed = true;
     }
+    if (Array.isArray(bag.wishes)) {
+      wishes[id] = bag.wishes.flatMap((row) => {
+        const wish = asWish(row);
+        return wish ? [wish] : [];
+      });
+      changed = true;
+    }
   }
   if (!changed) return;
   localStorage.setItem(NOTES_KEY, JSON.stringify(notes));
   localStorage.setItem(CHECKS_KEY, JSON.stringify(checks));
   localStorage.setItem(VISITS_KEY, JSON.stringify(visits));
   localStorage.setItem(EXTRAS_KEY, JSON.stringify(extras));
+  localStorage.setItem(WISHES_KEY, JSON.stringify(wishes));
   touchLocalEdit();
 }
 
@@ -1709,6 +1758,7 @@ export async function downloadTrip(trip: TripBook): Promise<void> {
       checks: readCheckMap()[trip.id] || {},
       visits: readVisitMap()[trip.id] || {},
       extras: readExtraMap()[trip.id] || [],
+      wishes: loadWishes(trip.id),
     },
   };
   const blob = new Blob([JSON.stringify(file, null, 2)], { type: "application/json" });

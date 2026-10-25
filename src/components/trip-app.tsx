@@ -21,6 +21,7 @@ import {
 import {
   cityLabel,
   cleanCredit,
+  dayChipParts,
   dayKey,
   dayMenu,
   daySouvenirs,
@@ -68,8 +69,9 @@ import {
 import { DrivePanel } from "@/components/drive-panel";
 import { syncTripDriveIfDue } from "@/lib/drive-sync";
 import { AI_TRIP_PROMPT, wishUpdatePrompt } from "@/lib/ai-prompt";
-import { dayIdForDate, loadMoneyLinks, moneyLinkBackUrl, moneySpendUrl, moneyTripIdForBook, rankTripBooks, readMoneyRef, rememberMoneyRef, saveMoneyLink, spendItem, type MoneyTripRef } from "@/lib/money-link";
+import { dayIdForDate, loadMoneyLinks, moneyLinkBackUrl, moneySpendUrl, moneyTripIdForBook, rankTripBooks, readMoneyRef, rememberMoneyRef, saveMoneyLink, spendItem, type MoneyTripRef, type SpendCategory } from "@/lib/money-link";
 import { placeFromMaps, resolveMapsPlace, shortMapsLink } from "@/lib/maps-place";
+import { startLocate, type PlaceFix } from "@/lib/geo";
 
 const TAB_ICON: Record<string, LucideIcon> = {
   overview: BookOpen,
@@ -90,22 +92,20 @@ function coverOf(trip: TripBook): string {
 }
 
 function dayChip(day: TripDay): { num: string; hint: string } {
-  const num = day.label.match(/(\d{1,2})/)?.[1] ?? day.label.slice(0, 2);
-  if (day.label.includes("聖誕")) return { num, hint: "聖誕" };
-  if (day.label.includes("返")) return { num, hint: "回程" };
-  const inside = day.label.match(/（([^）]+)）/)?.[1] ?? "";
-  const mark = inside.match(/[一二三四五六日]/)?.[0];
-  return { num, hint: mark ? `週${mark}` : inside || cityLabel(day.city) };
+  return dayChipParts(day);
 }
 
 function labelTables(root: ParentNode) {
   root.querySelectorAll("table").forEach((table) => {
     const headers = [...table.querySelectorAll("thead th")].map((th) => (th.textContent || "").trim());
-    if (!headers.length) return;
     table.classList.add("stackable");
     table.querySelectorAll("tbody tr").forEach((tr) => {
-      [...tr.children].forEach((cell, index) => {
-        if (cell instanceof HTMLElement && headers[index]) cell.dataset.label = headers[index];
+      const cells = [...tr.children];
+      cells.forEach((cell, index) => {
+        if (!(cell instanceof HTMLElement)) return;
+        if (headers[index]) cell.dataset.label = headers[index];
+        else if (cells.length === 2) cell.dataset.label = index === 0 ? "項目" : "詳情";
+        else if (!cell.dataset.label) cell.dataset.label = `欄 ${index + 1}`;
       });
     });
   });
@@ -235,7 +235,14 @@ function plainText(html: string): string {
   return html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
 }
 
-type SearchHit = { dayId: string; kind: "day" | "spot" | "meal" | "hotel"; index: number; title: string; meta: string };
+type SearchHit = {
+  dayId: string;
+  kind: "day" | "spot" | "meal" | "hotel" | "guide" | "note" | "wish";
+  index: number;
+  title: string;
+  meta: string;
+  guideId?: string;
+};
 
 function searchTrip(trip: TripBook, query: string): SearchHit[] {
   const needle = query.trim().toLowerCase();
@@ -244,6 +251,10 @@ function searchTrip(trip: TripBook, query: string): SearchHit[] {
   for (const day of trip.days) {
     if (`${day.label} ${day.title}`.toLowerCase().includes(needle)) {
       hits.push({ dayId: day.id, kind: "day", index: -1, title: day.title || day.label, meta: day.label });
+    }
+    const note = loadNote(trip.id, day.id);
+    if (note && note.toLowerCase().includes(needle)) {
+      hits.push({ dayId: day.id, kind: "note", index: -1, title: note.slice(0, 40), meta: `${day.label} · 筆記` });
     }
     day.spots.forEach((spot, index) => {
       const blob = `${spot.name} ${spot.badge} ${spot.hours} ${spot.address} ${spot.price} ${plainText(spot.html)}`.toLowerCase();
@@ -261,6 +272,30 @@ function searchTrip(trip: TripBook, query: string): SearchHit[] {
       hits.push({ dayId: day.id, kind: "hotel", index, title: hotel.name, meta: `${day.label} · 🛏️ 住宿` });
     });
   }
+  for (const wish of loadWishes(trip.id)) {
+    const blob = `${wish.name} ${wish.note} ${wish.kind}`.toLowerCase();
+    if (!blob.includes(needle)) continue;
+    const day = trip.days.find((item) => item.id === wish.dayId);
+    hits.push({
+      dayId: wish.dayId || trip.days[0]?.id || "",
+      kind: "wish",
+      index: -1,
+      title: wish.name,
+      meta: `${day?.label || "願望"} · 想去`,
+    });
+  }
+  trip.guides.forEach((guide) => {
+    const blob = `${guide.label} ${plainText(guide.html)}`.toLowerCase();
+    if (!blob.includes(needle)) return;
+    hits.push({
+      dayId: trip.days[0]?.id || "",
+      kind: "guide",
+      index: -1,
+      title: chipTitle(guide.label) || guide.label,
+      meta: "指南",
+      guideId: guide.id,
+    });
+  });
   hits.sort((a, b) => Number(!(a.kind !== "day" && a.title.toLowerCase().includes(needle))) - Number(!(b.kind !== "day" && b.title.toLowerCase().includes(needle))));
   return hits.slice(0, 40);
 }
@@ -268,6 +303,48 @@ function searchTrip(trip: TripBook, query: string): SearchHit[] {
 function focusDay(trip: TripBook, iso: string): { tab: string; dayId: string } {
   const dayId = dayIdForDate(trip, iso) || todayDay(trip)?.id || trip.days[0]?.id || "";
   return { tab: dayId ? "days" : "", dayId };
+}
+
+function stopNames(day: TripDay): string[] {
+  return [
+    ...day.spots.map((spot) => spot.name),
+    ...day.meals.map((meal) => meal.name),
+    ...day.hotels.map((hotel) => hotel.name),
+  ];
+}
+
+function tripReplacePreview(prev: TripBook | undefined, next: TripBook): string[] {
+  if (!prev) return [`新行程「${next.title}」：${next.days.length} 日`];
+  const lines: string[] = [];
+  if (prev.title !== next.title) lines.push(`標題：${prev.title} → ${next.title}`);
+  const prevIds = new Set(prev.days.map((day) => day.id));
+  const nextIds = new Set(next.days.map((day) => day.id));
+  for (const day of next.days) {
+    const old = prev.days.find((item) => item.id === day.id);
+    if (!old) {
+      lines.push(`＋ ${day.label || day.id}（新日子，${stopNames(day).length} 站）`);
+      continue;
+    }
+    const before = new Set(stopNames(old));
+    const after = stopNames(day);
+    const added = after.filter((name) => !before.has(name));
+    const removed = [...before].filter((name) => !after.includes(name));
+    if (old.label !== day.label || old.title !== day.title) {
+      lines.push(`～ ${old.label} → ${day.label}${day.title && day.title !== old.title ? `（${day.title}）` : ""}`);
+    }
+    if (added.length || removed.length) {
+      const bits = [];
+      if (added.length) bits.push(`加 ${added.slice(0, 4).join("、")}${added.length > 4 ? "…" : ""}`);
+      if (removed.length) bits.push(`減 ${removed.slice(0, 4).join("、")}${removed.length > 4 ? "…" : ""}`);
+      lines.push(`· ${day.label || day.id}：${bits.join("；")}`);
+    }
+  }
+  for (const day of prev.days) {
+    if (!nextIds.has(day.id)) lines.push(`－ ${day.label || day.id}（會移除日子）`);
+  }
+  if (!lines.length) lines.push("日子同站點大致相同；筆記／打卡／願望會喺同 id 保留。");
+  else lines.push("筆記、打卡、願望會喺相同 id 保留。");
+  return lines.slice(0, 12);
 }
 
 export function TripApp() {
@@ -282,6 +359,7 @@ export function TripApp() {
   const [promptFallback, setPromptFallback] = useState(false);
   const [rev, setRev] = useState(0);
   const [moneyAsk, setMoneyAsk] = useState<MoneyTripRef | null>(null);
+  const [pendingImport, setPendingImport] = useState<{ books: TripBook[]; source: string; lines: string[]; raw: string } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -375,9 +453,21 @@ export function TripApp() {
 
   async function onFile(file: File) {
     try {
-      const text = await file.text();
-      absorbSaved(text);
-      importBooks(parseTripFile(text), file.name);
+      const raw = await file.text();
+      const books = parseTripFile(raw);
+      const replacing = books.filter((book) => trips.some((trip) => trip.id === book.id));
+      if (replacing.length) {
+        const lines = replacing.flatMap((book) => {
+          const prev = trips.find((trip) => trip.id === book.id);
+          return [`【${book.title || book.id}】`, ...tripReplacePreview(prev, book)];
+        });
+        setPendingImport({ books, source: file.name, lines, raw });
+        setError("");
+        setStatus("上傳會更新現有行程，請確認變更。");
+        return;
+      }
+      absorbSaved(raw);
+      importBooks(books, file.name);
     } catch (err) {
       setStatus("");
       setError(err instanceof Error ? err.message : "無法讀取行程檔");
@@ -436,8 +526,38 @@ export function TripApp() {
               event.target.value = "";
             }}
           />
+          {pendingImport ? (
+            <section className="import-preview">
+              <h2>確認更新行程</h2>
+              <p className="muted">{pendingImport.source}</p>
+              <ul>
+                {pendingImport.lines.map((line) => (
+                  <li key={line}>{line}</li>
+                ))}
+              </ul>
+              <div className="here-actions">
+                <button
+                  className="btn primary"
+                  type="button"
+                  onClick={() => {
+                    const payload = pendingImport;
+                    if (!payload) return;
+                    setPendingImport(null);
+                    absorbSaved(payload.raw);
+                    importBooks(payload.books, payload.source);
+                  }}
+                >
+                  確認更新
+                </button>
+                <button className="btn ghost" type="button" onClick={() => setPendingImport(null)}>
+                  取消
+                </button>
+              </div>
+            </section>
+          ) : null}
           {trips.length === 0 ? (
             <section className="empty">
+              <p className="empty-lead">平常做法：撳「用 AI 寫行程」，問完之後下載 JSON，再上傳呢度睇。</p>
               <button
                 className={dragOver ? "dropzone over" : "dropzone"}
                 type="button"
@@ -450,8 +570,8 @@ export function TripApp() {
                 onDrop={onDrop}
               >
                 <Upload size={28} aria-hidden="true" />
-                <strong>加入行程</strong>
-                <span>上傳 JSON。內容留喺呢部手機，可以同步去 Google Drive</span>
+                <strong>上傳 AI 產出嘅行程</strong>
+                <span>唔使手寫 JSON。檔案只存在呢部手機，亦可選同步 Google Drive</span>
               </button>
             </section>
           ) : (
@@ -692,7 +812,7 @@ function Book({
   const eatGuides = trip.guides.filter((guide) => guide.id === "food" || guide.id === "souvenir" || /美食|手信/.test(guide.label));
   const eatIds = new Set(eatGuides.map((guide) => guide.id));
   const guideIds = new Set(trip.guides.map((guide) => guide.id));
-  const rootTab = eatIds.has(activeTab)
+  const rootTab = eatIds.has(activeTab) || activeTab === "food" || activeTab === "eat"
     ? "eat"
     : guideIds.has(activeTab) || activeTab === "guides"
       ? "guides"
@@ -757,10 +877,16 @@ function Book({
         const all = guideSlices(guide.html).slices;
         const slices = all.flatMap((slice, index) => {
           const title = chipTitle(slice.title);
-          if (!title || title === chipTitle(guide.label) || /相片|Wikimedia|commons/i.test(title)) return [];
+          if (!title || title === "內容" || title === chipTitle(guide.label) || /相片|Wikimedia|commons/i.test(title)) return [];
           return [{ title, index }];
         });
-        const shown = slices.length ? slices : all.map((slice, index) => ({ title: chipTitle(slice.title) || chipTitle(guide.label), index }));
+        const shown = slices.length
+          ? slices
+          : all.flatMap((slice, index) => {
+              const title = chipTitle(slice.title) || chipTitle(guide.label);
+              if (!title || title === "內容") return [];
+              return [{ title, index }];
+            });
         return { guide, slices: shown };
       })
       .filter((menu) => menu.slices.length);
@@ -789,19 +915,38 @@ function Book({
   else if (rootTab === "days" && activeDay) screenTitle = activeDay.label || activeDay.title;
   else if (rootTab === "transport") screenTitle = "交通";
   else if (rootTab === "map") screenTitle = "地圖";
-  else if (openEat) screenTitle = "美食手信";
+  else if (rootTab === "eat") screenTitle = "美食手信";
   else if (topic) screenTitle = topic.title;
   else if (openGuide) screenTitle = openGuide.label;
   else if (rootTab === "guides") screenTitle = "指南";
   else screenTitle = "總覽";
 
   function openHit(hit: SearchHit) {
-    pendingEntry.current = hit.kind === "day" ? undefined : { kind: hit.kind, index: hit.index };
     setSearching(false);
     setQuery("");
+    if (hit.kind === "guide" && hit.guideId) {
+      pendingEntry.current = undefined;
+      setEntryAt(null);
+      onTab(hit.guideId);
+      window.scrollTo({ top: 0 });
+      return;
+    }
+    if (hit.kind === "wish" || hit.kind === "note") {
+      pendingEntry.current = undefined;
+      setEntryAt(null);
+      onTab("days");
+      if (hit.dayId && hit.dayId !== activeDay?.id) onDay(hit.dayId);
+      window.scrollTo({ top: 0 });
+      return;
+    }
+    const entry =
+      hit.kind === "spot" || hit.kind === "meal" || hit.kind === "hotel"
+        ? { kind: hit.kind, index: hit.index }
+        : null;
+    pendingEntry.current = entry || undefined;
     onTab("days");
     if (hit.dayId === activeDay?.id) {
-      setEntryAt(hit.kind === "day" ? null : { kind: hit.kind, index: hit.index });
+      setEntryAt(entry);
       pendingEntry.current = undefined;
     } else {
       onDay(hit.dayId);
@@ -908,7 +1053,7 @@ function Book({
               </dl>
             ) : null}
             {activeDay && detailItem ? (
-              <SpotMoney trip={trip} day={activeDay} label={detailItem.name} price={spotView?.price || detailItem.price} blank />
+              <SpotMoney trip={trip} day={activeDay} label={detailItem.name} price={spotView?.price || detailItem.price} blank category={entryMeal ? "meal" : entryHotel ? "hotel" : "sight"} />
             ) : null}
             {detailItem.image ? (
               <figure className="spot-figure">
@@ -1006,36 +1151,86 @@ function Book({
           />
         ) : null}
 
-        {!searching && !detailItem && rootTab === "eat" && openEat ? (
+        {!searching && !detailItem && rootTab === "eat" ? (
           <section className="screen">
-            <div className="segment">
-              {eatGuides.map((guide) => (
-                <div
-                  key={guide.id}
-                  className={guide.id === openEat.id ? "on" : ""}
-                  onClick={() => {
-                    onTab(guide.id);
-                    window.scrollTo({ top: 0 });
-                  }}
-                >
-                  {guide.label}
+            {activeDay ? (
+              <div className="food-day-block">
+                <div className="daystrip dayjump" aria-label="日期">
+                  {trip.days.map((item) => {
+                    const chip = dayChip(item);
+                    const on = item.id === activeDay.id;
+                    return (
+                      <div key={item.id} className={on ? "daychip on" : "daychip"} onClick={() => onDay(item.id)}>
+                        <b>{chip.num}</b>
+                        {chip.hint ? <small>{chip.hint}</small> : null}
+                      </div>
+                    );
+                  })}
                 </div>
-              ))}
-            </div>
-            {anchored.anchors.length ? (
-              <div className="daystrip anchorstrip">
-                {anchored.anchors.map((item) => (
-                  <div
-                    key={item.id}
-                    className="daychip"
-                    onClick={() => document.getElementById(item.id)?.scrollIntoView({ behavior: "smooth", block: "start" })}
-                  >
-                    {item.label}
+                <h2 className="section-label">{activeDay.label} · 今日餐</h2>
+                {activeDay.meals.length ? (
+                  <div className="sheet plan">
+                    {activeDay.meals.map((meal, index) => (
+                      <article key={`${meal.name}-${index}`} className="food-meal-card">
+                        <div className="food-meal-top">
+                          <strong>{meal.name}</strong>
+                          <span>{[meal.slot, meal.place].filter(Boolean).join(" · ")}</span>
+                        </div>
+                        {[meal.hours, meal.price, meal.address, meal.note].filter(Boolean).length ? (
+                          <p className="food-meal-meta">{[meal.hours, meal.price, meal.address, meal.note].filter(Boolean).join(" · ")}</p>
+                        ) : null}
+                        <div className="food-meal-actions">
+                          <button className="ghost" type="button" onClick={() => { setEntryAt({ kind: "meal", index }); window.scrollTo({ top: 0 }); }}>
+                            詳情
+                          </button>
+                          <SpotMoney trip={trip} day={activeDay} label={meal.name} price={meal.price} compact blank category="meal" />
+                        </div>
+                      </article>
+                    ))}
                   </div>
-                ))}
+                ) : (
+                  <p className="muted">今日未列餐。可睇下面美食指南，或喺「想去」加餐廳。</p>
+                )}
               </div>
             ) : null}
-            <article className="guide-read eat-read" dangerouslySetInnerHTML={{ __html: anchored.html }} />
+            {eatGuides.length ? (
+              <>
+                <div className="segment">
+                  {eatGuides.map((guide) => (
+                    <div
+                      key={guide.id}
+                      className={openEat && guide.id === openEat.id ? "on" : ""}
+                      onClick={() => {
+                        onTab(guide.id);
+                        window.scrollTo({ top: 0 });
+                      }}
+                    >
+                      {guide.label}
+                    </div>
+                  ))}
+                </div>
+                {openEat ? (
+                  <>
+                    {anchored.anchors.length ? (
+                      <div className="daystrip anchorstrip">
+                        {anchored.anchors.map((item) => (
+                          <div
+                            key={item.id}
+                            className="daychip"
+                            onClick={() => document.getElementById(item.id)?.scrollIntoView({ behavior: "smooth", block: "start" })}
+                          >
+                            {item.label}
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+                    <article className="guide-read eat-read" dangerouslySetInnerHTML={{ __html: anchored.html }} />
+                  </>
+                ) : null}
+              </>
+            ) : (
+              <p className="soft-hint">暫無美食／手信指南。日常路徑係用 AI 寫行程時一併產出。</p>
+            )}
           </section>
         ) : null}
 
@@ -1113,8 +1308,8 @@ function Book({
           ["map", "地圖"],
           [eatGuides[0]?.id || "food", "美食"],
           ["guides", "指南"],
-        ].filter(([id]) => id !== "food" || eatGuides.length).map(([id, label]) => (
-          <button key={label} type="button" aria-selected={rootTab === (eatIds.has(id) ? "eat" : id)} onClick={() => openDock(id)}>
+        ].map(([id, label]) => (
+          <button key={label} type="button" aria-selected={rootTab === (eatIds.has(id) || id === "food" ? "eat" : id)} onClick={() => openDock(id)}>
             {label}
           </button>
         ))}
@@ -1830,7 +2025,7 @@ function DayScreen({
                           <small>{[mealItem.address, mealItem.price].filter(Boolean).join(" · ")}</small>
                         ) : null}
                         {at ? <span className="pill-hint">{visitClock(at)} 已去</span> : null}
-                        <SpotMoney trip={trip} day={day} label={mealItem.name} price={mealItem.price} compact blank />
+                        <SpotMoney trip={trip} day={day} label={mealItem.name} price={mealItem.price} compact blank category="meal" />
                       </span>
                       <button
                         className={at ? "stamp on" : "stamp"}
@@ -1908,7 +2103,7 @@ function DayScreen({
                         <small>{[spotItem.address, spotItem.price].filter(Boolean).join(" · ")}</small>
                       ) : null}
                       {at ? <span className="pill-hint">{visitClock(at)} 已去</span> : null}
-                      <SpotMoney trip={trip} day={day} label={spotItem.name} price={spotItem.price} compact blank />
+                      <SpotMoney trip={trip} day={day} label={spotItem.name} price={spotItem.price} compact blank category="sight" />
                     </span>
                     <button
                       className={at ? "stamp on" : "stamp"}
@@ -1980,6 +2175,7 @@ function SpotMoney({
   price,
   compact,
   blank,
+  category,
 }: {
   trip: TripBook;
   day: TripDay;
@@ -1987,8 +2183,9 @@ function SpotMoney({
   price: string;
   compact?: boolean;
   blank?: boolean;
+  category?: SpendCategory;
 }) {
-  const item = spendItem(trip, day, label, price, blank);
+  const item = spendItem(trip, day, label, price, blank, category);
   if (!item) return null;
   return (
     <a
@@ -2016,11 +2213,17 @@ function RideCard({
 }) {
   const line = [ride.detail, ride.price].filter(Boolean).join(" · ");
   const [open, setOpen] = useState(false);
-  const openable = Boolean((ride.entry || ride.spot) && onOpenRide);
-  const longNote = ride.note.length > 36;
+  const hasLinkedStop = Boolean(ride.entry || ride.spot);
   return (
-    <div className={openable ? "leg openable" : "leg"}>
-      <button className="leg-main" type="button" disabled={!openable} onClick={() => openable && onOpenRide?.(ride)}>
+    <div className="leg openable">
+      <button
+        className="leg-main"
+        type="button"
+        onClick={() => {
+          if (hasLinkedStop && onOpenRide) onOpenRide(ride);
+          else setOpen((value) => !value);
+        }}
+      >
         <span className="mode">{ride.mode || "前往"}</span>
         <span>
           <strong>
@@ -2029,17 +2232,30 @@ function RideCard({
           {line ? <small>{line}</small> : null}
         </span>
       </button>
-      {ride.note ? (
-        longNote && !open ? (
-          <button className="leg-more" type="button" onClick={() => setOpen(true)}>
-            班次詳情
-          </button>
-        ) : (
-          <p className="tiny">{ride.note}</p>
-        )
-      ) : null}
+      {open || (!hasLinkedStop && ride.note && ride.note.length <= 36) ? (
+        <div className="ride-detail">
+          {ride.mode ? <p className="tiny">方式：{ride.mode}</p> : null}
+          {ride.detail ? <p className="tiny">路程：{ride.detail}</p> : null}
+          {ride.price ? <p className="tiny">費用：{ride.price}</p> : null}
+          {ride.note ? <p className="tiny">{ride.note}</p> : null}
+          {!ride.mode && !ride.detail && !ride.price && !ride.note ? <p className="tiny">未有更多班次資料。</p> : null}
+          {hasLinkedStop && onOpenRide ? (
+            <button className="leg-more" type="button" onClick={() => onOpenRide(ride)}>
+              去相關景點
+            </button>
+          ) : null}
+        </div>
+      ) : ride.note ? (
+        <button className="leg-more" type="button" onClick={() => setOpen(true)}>
+          班次詳情
+        </button>
+      ) : (
+        <button className="leg-more" type="button" onClick={() => setOpen(true)}>
+          交通詳情
+        </button>
+      )}
       {trip && day ? (
-        <SpotMoney trip={trip} day={day} label={ride.detail || `${ride.from} → ${ride.to}`} price={ride.price} compact />
+        <SpotMoney trip={trip} day={day} label={ride.detail || `${ride.from} → ${ride.to}`} price={ride.price} compact category="ride" />
       ) : null}
     </div>
   );
@@ -2221,7 +2437,9 @@ function Transport({ trip, dayId, onDay }: { trip: TripBook; dayId: string; onDa
   const day = trip.days.find((item) => item.id === dayId) || days[0];
   const chipRef = useRef<HTMLDivElement>(null);
   const covered = new Set(days.map((item) => item.label.replace(/\s+/g, "").slice(0, 6)));
-  const leftover = trip.transport.blocks.filter((block) => !covered.has(block.heading.replace(/\s+/g, "").slice(0, 6)) && !days.some((item) => block.heading.replace(/\s+/g, "").includes(item.label.replace(/\s+/g, "").slice(0, 6))));
+  const leftoverAll = trip.transport.blocks.filter((block) => !covered.has(block.heading.replace(/\s+/g, "").slice(0, 6)) && !days.some((item) => block.heading.replace(/\s+/g, "").includes(item.label.replace(/\s+/g, "").slice(0, 6))));
+  // Show unmatched legacy blocks once on the first transport day only — not under every day chip.
+  const leftover = day && days[0] && day.id === days[0].id ? leftoverAll : [];
   useEffect(() => {
     const strip = chipRef.current?.parentElement;
     const chip = chipRef.current;
@@ -2264,11 +2482,18 @@ function Transport({ trip, dayId, onDay }: { trip: TripBook; dayId: string; onDa
           )}
         </article>
       ) : null}
-      {leftover.map((block) => (
-        <article className="reading block" key={block.heading}>
-          <div dangerouslySetInnerHTML={{ __html: block.html }} />
-        </article>
-      ))}
+      {leftover.length ? (
+        <section className="transport-extra">
+          <h2 className="section-label">其他交通備註</h2>
+          <p className="soft-hint">唔屬於上面日子嘅舊格式交通說明，只顯示一次。</p>
+          {leftover.map((block) => (
+            <article className="reading block" key={block.heading}>
+              {block.heading ? <h3 className="sheet-label">{block.heading}</h3> : null}
+              <div dangerouslySetInnerHTML={{ __html: block.html }} />
+            </article>
+          ))}
+        </section>
+      ) : null}
     </section>
   );
 }
