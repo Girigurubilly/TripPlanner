@@ -57,6 +57,11 @@ describe("money link", () => {
     assert.equal(spendItem(osaka, osaka.days[0], "通天閣", "免費", true)?.amount, 0);
     assert.equal(spendItem(osaka, osaka.days[0], "通天閣", "", true)?.currency, "HKD");
     assert.equal(items[0]?.date, "2026-04-02");
+    assert.equal(items.find((item) => item.label === "通天閣")?.category, "sight");
+    assert.equal(items.find((item) => item.category === "ride")?.category, "ride");
+    assert.ok(items.some((item) => item.category === "ride" && (item.label.includes("南海") || item.label.includes("難波") || item.label.includes("關西"))));
+    assert.equal(spendItem(osaka, osaka.days[0], "通天閣", "¥800", false, "sight")?.category, "sight");
+    assert.equal(spendItem(osaka, osaka.days[0], "晚餐", "¥1200", false, "meal")?.category, "meal");
     const url = new URL(moneySpendUrl({ trip: "大阪散步", tripId: "osaka", items }));
     assert.match(url.hash, /^#proposal=/);
     assert.equal(url.origin + url.pathname, "https://girigurubilly.github.io/MoneyTracker/");

@@ -15,11 +15,15 @@ export type MoneyTripRef = {
   day: string;
 };
 
+export type SpendCategory = "sight" | "meal" | "ride" | "hotel" | "other";
+
 export type SpendItem = {
   date: string;
   label: string;
   amount: number;
   currency: string;
+  /** Hint for MoneyTracker proposal sheet — not a Money category id. */
+  category?: SpendCategory;
 };
 
 export function readMoneyRef(search: string): MoneyTripRef | null {
@@ -72,7 +76,7 @@ function encodeToken(json: string): string {
 
 export function moneyTripIdForBook(bookId: string): string {
   const links = loadMoneyLinks();
-  return Object.entries(links).find(([, book]) => book === bookId)?.[0] || "";
+  return Object.entries(links).find(([, book]) => book === bookId)?.[0] || bookId;
 }
 
 function isoDate(date: Date): string {
@@ -149,18 +153,26 @@ export function dayIdForDate(trip: TripBook, iso: string): string {
   return index >= 0 ? trip.days[index]?.id || "" : "";
 }
 
-export function spendItem(trip: TripBook, day: TripDay, label: string, price: string, blank = false): SpendItem | null {
+export function spendItem(
+  trip: TripBook,
+  day: TripDay,
+  label: string,
+  price: string,
+  blank = false,
+  category?: SpendCategory,
+): SpendItem | null {
   const index = trip.days.findIndex((item) => item.id === day.id);
   const date = dayDates(trip)[index];
   if (!(date instanceof Date)) return null;
   const name = label.trim().slice(0, 80);
   if (!name) return null;
   const parsed = parsePrice(price);
+  const base = category ? { category } : {};
   if (!parsed) {
     if (!blank) return null;
-    return { date: isoDate(date), label: name, amount: 0, currency: "HKD" };
+    return { date: isoDate(date), label: name, amount: 0, currency: "HKD", ...base };
   }
-  return { date: isoDate(date), label: name, amount: parsed.amount, currency: parsed.currency };
+  return { date: isoDate(date), label: name, amount: parsed.amount, currency: parsed.currency, ...base };
 }
 
 export function spendOnDay(trip: TripBook, day: TripDay): SpendItem[] {
@@ -170,7 +182,7 @@ export function spendOnDay(trip: TripBook, day: TripDay): SpendItem[] {
   const iso = isoDate(date);
   const items: SpendItem[] = [];
   const seen = new Set<string>();
-  const push = (label: string, price: string) => {
+  const push = (label: string, price: string, category: SpendCategory) => {
     const parsed = parsePrice(price);
     if (!parsed) return;
     const name = label.trim().slice(0, 80);
@@ -178,11 +190,12 @@ export function spendOnDay(trip: TripBook, day: TripDay): SpendItem[] {
     const key = `${name}|${parsed.amount}|${parsed.currency}`;
     if (seen.has(key)) return;
     seen.add(key);
-    items.push({ date: iso, label: name, amount: parsed.amount, currency: parsed.currency });
+    items.push({ date: iso, label: name, amount: parsed.amount, currency: parsed.currency, category });
   };
-  for (const spot of day.spots) push(spot.name, spot.price);
-  for (const meal of day.meals) push(meal.name, meal.price);
-  for (const ride of day.rides) push(ride.detail || `${ride.from} → ${ride.to}`, ride.price);
+  for (const spot of day.spots) push(spot.name, spot.price, "sight");
+  for (const meal of day.meals) push(meal.name, meal.price, "meal");
+  for (const hotel of day.hotels) push(hotel.name, hotel.price, "hotel");
+  for (const ride of day.rides) push(ride.detail || `${ride.from} → ${ride.to}`, ride.price, "ride");
   return items.slice(0, 20);
 }
 
