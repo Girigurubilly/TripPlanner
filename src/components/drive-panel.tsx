@@ -33,6 +33,7 @@ export function DrivePanel({ onLibraryChange }: { onLibraryChange: () => void })
   const [shareMode, setShareMode] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
+  const [passError, setPassError] = useState("");
 
   useEffect(() => {
     setPassword(readDrivePass());
@@ -72,6 +73,7 @@ export function DrivePanel({ onLibraryChange }: { onLibraryChange: () => void })
           return;
         }
         if (synced === "need-pass") {
+          setPassError(RESULT["need-pass"]);
           setMessage(RESULT["need-pass"]);
           return;
         }
@@ -113,6 +115,7 @@ export function DrivePanel({ onLibraryChange }: { onLibraryChange: () => void })
         return;
       }
       if (msg === "pass" || msg === "bad-pass") {
+        setPassError("密碼不對。兩部機要用同一組密碼。");
         setMessage("密碼不對。兩部機要用同一組密碼。");
         return;
       }
@@ -127,9 +130,11 @@ export function DrivePanel({ onLibraryChange }: { onLibraryChange: () => void })
       return;
     }
     if (!password.trim()) {
+      setPassError("請設定密碼。檔案會加密，另一部機要打同一組。");
       setMessage("請設定密碼。檔案會加密，另一部機要打同一組。");
       return;
     }
+    setPassError("");
     setBusy(true);
     try {
       const token = storedAccessToken();
@@ -169,15 +174,24 @@ export function DrivePanel({ onLibraryChange }: { onLibraryChange: () => void })
           加密密碼
           <input
             value={password}
-            onChange={(event) => setPassword(event.target.value)}
+            onChange={(event) => {
+              setPassword(event.target.value);
+              if (passError) setPassError("");
+            }}
             type="password"
             autoComplete="off"
             placeholder="同理財 App 的 Drive 密碼"
+            aria-invalid={passError ? true : undefined}
           />
+          {passError ? <span className="field-error">{passError}</span> : null}
         </label>
-        <p className="tiny muted-tech">
-          進階：Redirect URI <code>{typeof window === "undefined" ? "" : redirectUri()}</code>
-        </p>
+        <details className="drive-advanced">
+          <summary>進階</summary>
+          <p className="tiny muted-tech drive-uri">
+            Redirect URI（貼去 Google Cloud）
+            <code>{typeof window === "undefined" ? "" : redirectUri()}</code>
+          </p>
+        </details>
         <button className="btn primary" type="button" disabled={busy} onClick={() => void begin("sync")}>
           {busy ? "處理緊…" : "同步呢部機"}
         </button>

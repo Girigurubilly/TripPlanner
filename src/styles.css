@@ -165,15 +165,18 @@
 .money-spot {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   align-self: flex-start;
-  margin-top: 6px;
-  min-height: 28px;
-  padding: 0 10px;
+  margin-top: 8px;
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0 14px;
   border-radius: 999px;
   background: var(--accent);
   color: #fff;
-  font-size: 0.75rem;
+  font-size: 0.8rem;
   font-weight: 650;
+  text-decoration: none;
 }
 .btn.ghost {
   background: transparent;
@@ -1002,13 +1005,20 @@ figure.refimg img {
   color: var(--muted);
   padding: 6px 10px 8px;
 }
-.screen > .dayjump {
+.screen > .dayjump,
+.daystrip.dayjump-sticky {
   position: sticky;
   top: 56px;
   z-index: 30;
   background: var(--paper);
   margin: 0 -16px 8px;
   padding: 8px 16px 10px;
+  box-shadow: 0 1px 0 var(--line);
+}
+.daystrip.dayjump-sticky {
+  /* keep horizontal scroll for chips, but solid so glyphs don't bleed through */
+  background: #f7f3ec;
+  background: color-mix(in srgb, var(--paper) 100%, #fff 0%);
 }
 .cover {
   position: relative;
@@ -1065,12 +1075,14 @@ figure.refimg img {
 }
 .dayfacts {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   margin: 0 0 10px;
-  overflow-x: auto;
+  overflow-x: visible;
 }
 .dayfact {
-  flex: 0 0 auto;
+  flex: 0 1 auto;
+  max-width: 100%;
   min-height: 36px;
   padding: 6px 12px;
   border: 1px solid var(--line);
@@ -1081,6 +1093,7 @@ figure.refimg img {
   font-size: 0.84rem;
   font-weight: 700;
   line-height: 1.3;
+  white-space: normal;
 }
 .restline {
   margin: -2px 2px 10px;
@@ -1952,6 +1965,24 @@ a.stamp {
   .book table.stackable tr:has(> td:nth-child(2)):not(:has(> td:nth-child(3))) td:last-child {
     padding-top: 2px;
   }
+  .book table.stackable td.row-title::before,
+  .book table.stackable td.row-meta::before {
+    content: none;
+  }
+  .book table.stackable td.row-title {
+    font-weight: 750;
+    color: var(--ink);
+    border-bottom: 0;
+    padding-bottom: 2px;
+  }
+  .book table.stackable td.row-meta {
+    color: var(--muted);
+    font-size: 0.92rem;
+    padding-top: 2px;
+  }
+  .book table.stackable td.row-meta:last-child {
+    border-bottom: 0;
+  }
 }
 
 @media (max-width: 640px) {
@@ -1989,7 +2020,7 @@ a.stamp {
 .app-shell main {
   max-width: 720px;
   margin: 0 auto;
-  padding: 12px 16px calc(92px + env(safe-area-inset-bottom));
+  padding: 12px 16px calc(120px + env(safe-area-inset-bottom));
 }
 .dock {
   position: fixed;
@@ -2434,6 +2465,7 @@ a.stamp {
 }
 .food-meal-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   margin-top: 8px;
   align-items: center;
@@ -2444,7 +2476,18 @@ a.stamp {
   color: var(--teal);
   font: inherit;
   font-weight: 700;
-  padding: 0;
+  min-height: 44px;
+  padding: 0 10px;
+}
+.stop-copy .money-spot {
+  display: inline-flex;
+}
+.stop-hours {
+  display: block;
+  color: var(--muted);
+}
+.stop-addr {
+  display: block;
 }
 .ride-detail {
   margin: 0 12px 8px 56px;
@@ -2467,4 +2510,76 @@ a.stamp {
 .map-picks button.miss {
   opacity: 0.45;
   text-decoration: line-through;
+}
+
+.drive-advanced {
+  margin: 8px 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+  padding: 0 12px;
+  overflow: hidden;
+}
+.drive-advanced > summary {
+  cursor: pointer;
+  font-weight: 700;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+}
+.drive-uri {
+  margin: 0 0 12px;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.drive-uri code {
+  display: block;
+  margin-top: 6px;
+  padding: 8px;
+  border-radius: 8px;
+  background: #f4f1ea;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.drive-field .field-error {
+  display: block;
+  margin-top: 6px;
+  color: #b42318;
+  font-size: 0.85rem;
+  font-weight: 650;
+}
+.guide-places {
+  margin: 0 0 14px;
+  padding: 4px 0;
+}
+.guide-place {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
+}
+.guide-place:last-child {
+  border-bottom: 0;
+}
+.guide-place-lines {
+  margin: 6px 0 0;
+  padding-left: 1.1rem;
+  color: #3d342c;
+  font-size: 0.9rem;
+}
+.guide-place-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 8px 0 0;
+}
+.locate-coarse {
+  color: #9a6700;
+  font-weight: 650;
+}
+.day-count-hint {
+  margin-top: -4px;
+}
+.wish-kinds .stamp {
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0 12px;
 }
