@@ -69,7 +69,7 @@ import {
 import { DrivePanel } from "@/components/drive-panel";
 import { syncTripDriveIfDue } from "@/lib/drive-sync";
 import { AI_TRIP_PROMPT, wishUpdatePrompt } from "@/lib/ai-prompt";
-import { dayIdForDate, loadMoneyLinks, moneyLinkBackUrl, moneySpendUrl, moneyTripIdForBook, rankTripBooks, readMoneyRef, rememberMoneyRef, saveMoneyLink, spendItem, type MoneyTripRef, type SpendCategory } from "@/lib/money-link";
+import { dayIdForDate, loadMoneyLinks, moneyLinkBackUrl, moneySpendUrl, moneyTripIdForBook, rankTripBooks, readMoneyRef, rememberMoneyRef, saveMoneyLink, spendItem, spendTimeHint, type MoneyTripRef, type SpendCategory } from "@/lib/money-link";
 import { placeFromMaps, resolveMapsPlace, shortMapsLink } from "@/lib/maps-place";
 import { startLocate, type PlaceFix } from "@/lib/geo";
 
@@ -100,12 +100,28 @@ function labelTables(root: ParentNode) {
     const headers = [...table.querySelectorAll("thead th")].map((th) => (th.textContent || "").trim());
     table.classList.add("stackable");
     table.querySelectorAll("tbody tr").forEach((tr) => {
-      const cells = [...tr.children];
-      cells.forEach((cell, index) => {
-        if (!(cell instanceof HTMLElement)) return;
-        if (headers[index]) cell.dataset.label = headers[index];
-        else if (cells.length === 2) cell.dataset.label = index === 0 ? "項目" : "詳情";
-        else if (!cell.dataset.label) cell.dataset.label = `欄 ${index + 1}`;
+      const cells = [...tr.children].filter((cell): cell is HTMLElement => cell instanceof HTMLElement);
+      const dataCells = cells.filter((cell) => !cell.classList.contains("book-cell"));
+      // Align thead labels with body cells (book-cell may be prepended on both).
+      const headLabels = headers.filter((_, index) => {
+        const th = table.querySelectorAll("thead th")[index];
+        return !(th instanceof HTMLElement && th.classList.contains("book-cell"));
+      });
+      dataCells.forEach((cell, index) => {
+        cell.classList.remove("row-title", "row-meta");
+        delete cell.dataset.label;
+        const header = headLabels[index] || "";
+        if (header && header !== "已訂") {
+          cell.dataset.label = header;
+          return;
+        }
+        if (dataCells.length === 2 && !headLabels.some(Boolean)) {
+          cell.dataset.label = index === 0 ? "項目" : "詳情";
+          return;
+        }
+        // Headerless multi-col: first cell is the row title; rest are plain meta. Never 「欄 N」.
+        if (index === 0) cell.classList.add("row-title");
+        else cell.classList.add("row-meta");
       });
     });
   });
@@ -862,6 +878,12 @@ function Book({
       const label = cityLabel(day.city);
       if (label && !names.includes(label)) names.push(label);
     }
+    for (const guide of trip.guides) {
+      if (!(guide.id === "food" || guide.id === "souvenir" || /美食|手信/.test(guide.label))) continue;
+      for (const place of guide.places || []) {
+        if (place.name && !names.includes(place.name)) names.push(place.name);
+      }
+    }
     return names;
   }, [trip]);
   const anchored = useMemo(() => placeAnchors(shownHtml(openEat?.html || ""), places), [openEat, places]);
@@ -1053,7 +1075,7 @@ function Book({
               </dl>
             ) : null}
             {activeDay && detailItem ? (
-              <SpotMoney trip={trip} day={activeDay} label={detailItem.name} price={spotView?.price || detailItem.price} blank category={entryMeal ? "meal" : entryHotel ? "hotel" : "sight"} />
+              <SpotMoney trip={trip} day={activeDay} label={detailItem.name} price={spotView?.price || detailItem.price} blank category={entryMeal ? "meal" : entryHotel ? "hotel" : "sight"} slot={entryMeal?.slot} hours={entryMeal?.hours || spotView?.hours || detailItem.hours} />
             ) : null}
             {detailItem.image ? (
               <figure className="spot-figure">
@@ -1155,7 +1177,7 @@ function Book({
           <section className="screen">
             {activeDay ? (
               <div className="food-day-block">
-                <div className="daystrip dayjump" aria-label="日期">
+                <div className="daystrip dayjump dayjump-sticky" aria-label="日期">
                   {trip.days.map((item) => {
                     const chip = dayChip(item);
                     const on = item.id === activeDay.id;
@@ -1183,7 +1205,7 @@ function Book({
                           <button className="ghost" type="button" onClick={() => { setEntryAt({ kind: "meal", index }); window.scrollTo({ top: 0 }); }}>
                             詳情
                           </button>
-                          <SpotMoney trip={trip} day={activeDay} label={meal.name} price={meal.price} compact blank category="meal" />
+                          <SpotMoney trip={trip} day={activeDay} label={meal.name} price={meal.price} compact blank category="meal" slot={meal.slot} hours={meal.hours} />
                         </div>
                       </article>
                     ))}
@@ -1221,6 +1243,34 @@ function Book({
                           >
                             {item.label}
                           </div>
+                        ))}
+                      </div>
+                    ) : null}
+                    {openEat.places?.length ? (
+                      <div className="guide-places sheet">
+                        {openEat.places.map((place, index) => (
+                          <article className="guide-place" key={`${place.name}-${place.address}-${index}`}>
+                            <strong>{place.name}</strong>
+                            {[place.city, place.address].filter(Boolean).length ? (
+                              <p className="muted">{[place.city, place.address].filter(Boolean).join(" · ")}</p>
+                            ) : null}
+                            {place.lines?.length ? (
+                              <ul className="guide-place-lines">
+                                {place.lines.slice(0, 4).map((line) => (
+                                  <li key={line}>{line}</li>
+                                ))}
+                              </ul>
+                            ) : null}
+                            {place.links?.length ? (
+                              <p className="guide-place-links">
+                                {place.links.map((link) => (
+                                  <a key={link.href} href={link.href} target="_blank" rel="noopener noreferrer">
+                                    {link.label || "連結"}
+                                  </a>
+                                ))}
+                              </p>
+                            ) : null}
+                          </article>
                         ))}
                       </div>
                     ) : null}
@@ -1879,7 +1929,7 @@ function DayScreen({
   }, [day, trip.id]);
   return (
     <section className="screen">
-      <div className="daystrip dayjump" aria-label="日期">
+      <div className="daystrip dayjump dayjump-sticky" aria-label="日期">
         {trip.days.map((item) => {
           const chip = dayChip(item);
           const on = item.id === day.id;
@@ -1896,6 +1946,9 @@ function DayScreen({
           );
         })}
       </div>
+      {titleDayCountHint(trip.title, trip.subtitle, trip.days.length) ? (
+        <p className="soft-hint day-count-hint">{titleDayCountHint(trip.title, trip.subtitle, trip.days.length)}</p>
+      ) : null}
       {hero ? (
         <figure className="refimg cover">
           <a href={hero.href || hero.src} target="_blank" rel="noopener">
@@ -2021,11 +2074,12 @@ function DayScreen({
                           {mealItem.badge ? <em>{mealItem.badge}</em> : null}
                         </strong>
                         <small className="kind-chip">🍽️ 用餐{mealItem.slot ? ` · ${mealItem.slot}` : ""}</small>
+                        {mealItem.hours ? <small className="stop-hours">{mealItem.hours}</small> : null}
                         {mealItem.address || mealItem.price ? (
-                          <small>{[mealItem.address, mealItem.price].filter(Boolean).join(" · ")}</small>
+                          <small className="stop-addr">{[mealItem.address, mealItem.price].filter(Boolean).join(" · ")}</small>
                         ) : null}
                         {at ? <span className="pill-hint">{visitClock(at)} 已去</span> : null}
-                        <SpotMoney trip={trip} day={day} label={mealItem.name} price={mealItem.price} compact blank category="meal" />
+                        <SpotMoney trip={trip} day={day} label={mealItem.name} price={mealItem.price} compact blank category="meal" slot={mealItem.slot} hours={mealItem.hours} />
                       </span>
                       <button
                         className={at ? "stamp on" : "stamp"}
@@ -2061,8 +2115,9 @@ function DayScreen({
                           {hotelItem.badge ? <em>{hotelItem.badge}</em> : null}
                         </strong>
                         <small className="kind-chip">🛏️ 住宿</small>
+                        {hotelItem.hours ? <small className="stop-hours">{hotelItem.hours}</small> : null}
                         {hotelItem.address || hotelItem.price ? (
-                          <small>{[hotelItem.address, hotelItem.price].filter(Boolean).join(" · ")}</small>
+                          <small className="stop-addr">{[hotelItem.address, hotelItem.price].filter(Boolean).join(" · ")}</small>
                         ) : null}
                         {at ? <span className="pill-hint">{visitClock(at)} 已去</span> : null}
                       </span>
@@ -2099,11 +2154,12 @@ function DayScreen({
                         {spotItem.badge ? <em>{spotItem.badge}</em> : null}
                       </strong>
                       <small className="kind-chip">📷 景點</small>
+                      {spotItem.hours ? <small className="stop-hours">{spotItem.hours}</small> : null}
                       {spotItem.address || spotItem.price ? (
-                        <small>{[spotItem.address, spotItem.price].filter(Boolean).join(" · ")}</small>
+                        <small className="stop-addr">{[spotItem.address, spotItem.price].filter(Boolean).join(" · ")}</small>
                       ) : null}
                       {at ? <span className="pill-hint">{visitClock(at)} 已去</span> : null}
-                      <SpotMoney trip={trip} day={day} label={spotItem.name} price={spotItem.price} compact blank category="sight" />
+                      <SpotMoney trip={trip} day={day} label={spotItem.name} price={spotItem.price} compact blank category="sight" hours={spotItem.hours} />
                     </span>
                     <button
                       className={at ? "stamp on" : "stamp"}
@@ -2168,6 +2224,25 @@ function DayScreen({
   );
 }
 
+
+function titleDayCountHint(title: string, subtitle: string, actual: number): string {
+  const text = `${title} ${subtitle}`;
+  const match = text.match(/(\d+)\s*(?:日|天|days?)/i);
+  if (!match) return "";
+  const claimed = Number(match[1]);
+  if (!claimed || claimed === actual || actual < 1) return "";
+  return `標題寫「${claimed}日」，日程實際有 ${actual} 日。`;
+}
+
+function accuracyLabel(meters: number): { text: string; coarse: boolean } {
+  if (meters >= 1000) {
+    const km = Math.round(meters / 100) / 10;
+    return { text: `大約 ${km} 公里（較粗，請核對地方名）`, coarse: true };
+  }
+  if (meters >= 100) return { text: `大約 ${Math.round(meters / 10) * 10} 米`, coarse: false };
+  return { text: `大約 ${Math.round(meters)} 米`, coarse: false };
+}
+
 function SpotMoney({
   trip,
   day,
@@ -2176,6 +2251,9 @@ function SpotMoney({
   compact,
   blank,
   category,
+  time,
+  slot,
+  hours,
 }: {
   trip: TripBook;
   day: TripDay;
@@ -2184,8 +2262,12 @@ function SpotMoney({
   compact?: boolean;
   blank?: boolean;
   category?: SpendCategory;
+  time?: string;
+  slot?: string;
+  hours?: string;
 }) {
-  const item = spendItem(trip, day, label, price, blank, category);
+  const clock = time || spendTimeHint(slot || "", hours || "");
+  const item = spendItem(trip, day, label, price, blank, category, clock);
   if (!item) return null;
   return (
     <a
@@ -2449,7 +2531,7 @@ function Transport({ trip, dayId, onDay }: { trip: TripBook; dayId: string; onDa
   return (
     <section className="screen">
       {days.length ? (
-        <div className="daystrip dayjump">
+        <div className="daystrip dayjump dayjump-sticky">
           {days.map((item) => {
             const chip = dayChip(item);
             const on = item.id === day?.id;
@@ -2766,7 +2848,11 @@ function ExtraStops({ tripId, dayId }: { tripId: string; dayId: string }) {
             onChange={(event) => setDraft({ ...draft, name: event.target.value })}
           />
           {draft.address ? <p className="tiny">{draft.address}</p> : null}
-          {draft.accuracy ? <p className="tiny">大約 {draft.accuracy} 米</p> : null}
+          {draft.accuracy ? (
+            <p className={accuracyLabel(draft.accuracy).coarse ? "tiny locate-coarse" : "tiny"}>
+              {accuracyLabel(draft.accuracy).text}
+            </p>
+          ) : null}
           <div className="here-actions">
             <button className="btn primary" type="submit" disabled={!draft.name.trim()}>
               確認打卡

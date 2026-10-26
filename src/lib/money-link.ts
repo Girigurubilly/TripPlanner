@@ -24,6 +24,8 @@ export type SpendItem = {
   currency: string;
   /** Hint for MoneyTracker proposal sheet — not a Money category id. */
   category?: SpendCategory;
+  /** Optional HH:mm for the meal/event — Money should not use wall-clock now. */
+  time?: string;
 };
 
 export function readMoneyRef(search: string): MoneyTripRef | null {
@@ -153,6 +155,25 @@ export function dayIdForDate(trip: TripBook, iso: string): string {
   return index >= 0 ? trip.days[index]?.id || "" : "";
 }
 
+
+/** Prefer hours start (e.g. 11:00-18:00); else map common meal slots to a clock time. */
+export function spendTimeHint(slot = "", hours = ""): string {
+  const fromHours = hours.match(/(\d{1,2})[:：](\d{2})/);
+  if (fromHours) return `${fromHours[1].padStart(2, "0")}:${fromHours[2]}`;
+  const blob = slot.trim();
+  const map: [string, string][] = [
+    ["早午餐", "10:30"],
+    ["早餐", "08:30"],
+    ["午餐", "12:30"],
+    ["下午茶", "15:00"],
+    ["輕晚餐", "18:30"],
+    ["晚餐", "19:00"],
+    ["宵夜", "22:00"],
+  ];
+  for (const [key, time] of map) if (blob.includes(key)) return time;
+  return "";
+}
+
 export function spendItem(
   trip: TripBook,
   day: TripDay,
@@ -160,6 +181,7 @@ export function spendItem(
   price: string,
   blank = false,
   category?: SpendCategory,
+  time = "",
 ): SpendItem | null {
   const index = trip.days.findIndex((item) => item.id === day.id);
   const date = dayDates(trip)[index];
@@ -167,7 +189,11 @@ export function spendItem(
   const name = label.trim().slice(0, 80);
   if (!name) return null;
   const parsed = parsePrice(price);
-  const base = category ? { category } : {};
+  const clock = /^\d{2}:\d{2}$/.test(time) ? time : "";
+  const base = {
+    ...(category ? { category } : {}),
+    ...(clock ? { time: clock } : {}),
+  };
   if (!parsed) {
     if (!blank) return null;
     return { date: isoDate(date), label: name, amount: 0, currency: "HKD", ...base };

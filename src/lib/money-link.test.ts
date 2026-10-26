@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { dayIdForDate, moneyLinkBackUrl, moneySpendUrl, parsePrice, rankTripBooks, readMoneyRef, spendItem, spendOnDay } from "./money-link.ts";
+import { dayIdForDate, moneyLinkBackUrl, moneySpendUrl, parsePrice, rankTripBooks, readMoneyRef, spendItem, spendOnDay, spendTimeHint } from "./money-link.ts";
 import type { TripBook } from "./trip.ts";
 
 function book(patch: Partial<TripBook> & Pick<TripBook, "id" | "title">): TripBook {
@@ -65,5 +65,8 @@ describe("money link", () => {
     const url = new URL(moneySpendUrl({ trip: "大阪散步", tripId: "osaka", items }));
     assert.match(url.hash, /^#proposal=/);
     assert.equal(url.origin + url.pathname, "https://girigurubilly.github.io/MoneyTracker/");
+    assert.equal(spendTimeHint("晚餐", "11:00-18:00"), "11:00");
+    assert.equal(spendTimeHint("晚餐", ""), "19:00");
+    assert.equal(spendItem(osaka, osaka.days[0], "晚餐", "¥1200", false, "meal", "19:00")?.time, "19:00");
   });
 });

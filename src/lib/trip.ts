@@ -1170,14 +1170,14 @@ function parseDay(value: unknown, index: number): TripDay {
 
 export function parseTripBook(value: unknown): TripBook {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error("行程檔要係一個 JSON 物件");
+    throw new Error("行程檔要係一個 JSON 物件（唔係文字或陣列）。");
   }
   const raw = value as Record<string, unknown>;
-  if (raw.schemaVersion !== 1) throw new Error("只接受 schemaVersion: 1");
+  if (raw.schemaVersion !== 1) throw new Error("只接受 schemaVersion: 1 嘅行程檔。");
   const id = asString(raw.id).trim();
   const title = asString(raw.title).trim();
-  if (!id) throw new Error("缺少 id");
-  if (!title) throw new Error("缺少 title");
+  if (!id) throw new Error("缺少 id（行程唯一編號，例如 osaka-2026）。JSON 頂層要有 \"id\" 字串。 / Missing id: top-level string id required.");
+  if (!title) throw new Error("缺少 title（行程標題）。JSON 頂層要有 \"title\" 字串。 / Missing title.");
   const navRaw = Array.isArray(raw.nav) ? raw.nav : [];
   const guidesRaw = Array.isArray(raw.guides) ? raw.guides : [];
   const daysRaw = Array.isArray(raw.days) ? raw.days : [];
@@ -1247,7 +1247,7 @@ export function parseTripBook(value: unknown): TripBook {
     trip.days.length > 0 ||
     trip.guides.length > 0 ||
     trip.transport.blocks.length > 0;
-  if (!hasBody) throw new Error("行程檔沒有內容");
+  if (!hasBody) throw new Error("行程檔冇內容（要有概覽、日程、指南或交通其中一樣）。");
   return trip;
 }
 
