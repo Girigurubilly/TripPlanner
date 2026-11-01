@@ -150,6 +150,13 @@ export type TripBook = {
   };
   guides: TripGuide[];
   footer: string;
+  /** Optional first-day date (YYYY-MM-DD). When present it anchors
+   *  dayDates / countdown / money-day matching; old JSON without it falls
+   *  back to guessing from day labels. */
+  startDate?: string;
+  /** Optional city display names from the JSON (city code → label, e.g.
+   *  { osaka: "大阪" }). Preferred over the built-in CITY_LABEL fallback. */
+  cityNames?: Record<string, string>;
 };
 
 const CITY_LABEL: Record<string, string> = {
@@ -186,17 +193,44 @@ const EDIT_KEY = "tripbook-local-edited";
 
 export type NoteMap = Record<string, Record<string, string>>;
 
-export function cityLabel(city: string): string {
+export function cityLabel(city: string, names?: Record<string, string>): string {
   const raw = city.trim();
   if (!raw) return "";
-  if (/[\u4e00-\u9fff]/.test(raw)) return raw;
   const key = raw.toLowerCase().replace(/\s+/g, "");
+  if (names) {
+    const given = names[raw] || names[key];
+    if (given) return given;
+  }
+  if (/[\u4e00-\u9fff]/.test(raw)) return raw;
   if (CITY_LABEL[key]) return CITY_LABEL[key];
   return raw;
 }
 
+/** City label using the trip's own JSON names first. */
+export function tripCityLabel(trip: Pick<TripBook, "cityNames">, city: string): string {
+  return cityLabel(city, trip.cityNames);
+}
+
+/** Short free-text note in a day label after the date, e.g. "12/25 聖誕" →
+ *  "聖誕", "5/1 Labour Day" → "Labour". Generic — no festival is hard-coded. */
+function labelNote(label: string): string {
+  const rest = label
+    .replace(/（[^）]*）|\([^)]*\)/g, " ")
+    .replace(/\d{1,2}\s*月\s*\d{1,2}\s*[日號]?/g, " ")
+    .replace(/\d{1,2}\s*[/／.-]\s*\d{1,2}/g, " ")
+    .replace(/(?:Day|day|D|第)\s*\d{1,2}\s*[日天]?/g, " ")
+    .replace(/[·・|｜,，:：\-–—]/g, " ")
+    .trim();
+  const word = rest.split(/\s+/).find((bit) => bit && !/^(?:day|d|\d+)$/i.test(bit)) || "";
+  if (/[\u4e00-\u9fff]/.test(word)) return word.length <= 4 ? word : "";
+  return word.length <= 6 ? word : "";
+}
+
 /** Day-of-month for chips: prefer the number AFTER month/day slash (4/2 → 2). */
-export function dayChipParts(day: { label: string; city: string }): { num: string; hint: string } {
+export function dayChipParts(
+  day: { label: string; city: string },
+  names?: Record<string, string>,
+): { num: string; hint: string } {
   const slash = day.label.match(/(\d{1,2})\s*[/／.\-]\s*(\d{1,2})/);
   const cn = day.label.match(/(\d{1,2})\s*月\s*(\d{1,2})/);
   const num =
@@ -205,11 +239,12 @@ export function dayChipParts(day: { label: string; city: string }): { num: strin
     day.label.match(/(?:Day|day|D|第)\s*(\d{1,2})/)?.[1] ??
     day.label.match(/(\d{1,2})/)?.[1] ??
     day.label.slice(0, 2);
-  if (day.label.includes("聖誕")) return { num, hint: "聖誕" };
+  const note = labelNote(day.label);
+  if (note && !/返/.test(note)) return { num, hint: note };
   if (day.label.includes("返")) return { num, hint: "回程" };
   const inside = day.label.match(/（([^）]+)）/)?.[1] ?? "";
   const mark = inside.match(/[一二三四五六日]/)?.[0];
-  return { num, hint: mark ? `週${mark}` : inside || cityLabel(day.city) };
+  return { num, hint: mark ? `週${mark}` : inside || cityLabel(day.city, names) };
 }
 
 export function cleanCredit(value: string): string {
@@ -242,7 +277,7 @@ export function tripStats(trip: TripBook): string {
   const spots = trip.days.reduce((sum, day) => sum + day.spots.length, 0);
   const meals = trip.days.reduce((sum, day) => sum + day.meals.length, 0);
   const hotels = trip.days.reduce((sum, day) => sum + day.hotels.length, 0);
-  const place = cities.map(cityLabel).join(" → ");
+  const place = cities.map((city) => cityLabel(city, trip.cityNames)).join(" → ");
   const bits = [`${trip.days.length} 日`, `${spots} 個景點`];
   if (meals) bits.push(`${meals} 餐`);
   if (hotels) bits.push(`${hotels} 住宿`);
@@ -273,12 +308,45 @@ function monthDay(text: string): { month: number; day: number } | null {
   return null;
 }
 
+/** Parse a YYYY-MM-DD start date (local midnight); null when absent/invalid. */
+export function tripStart(trip: Pick<TripBook, "startDate">): Date | null {
+  const match = (trip.startDate || "").trim().match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (!match) return null;
+  const [year, month, day] = [Number(match[1]), Number(match[2]), Number(match[3])];
+  const date = new Date(year, month - 1, day);
+  if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) return null;
+  return date;
+}
+
 function tripYear(trip: TripBook): number {
+  const start = tripStart(trip);
+  if (start) return start.getFullYear();
   const found = `${trip.subtitle} ${trip.title} ${trip.footer}`.match(/20\d{2}/);
   return found ? Number(found[0]) : new Date().getFullYear();
 }
 
 export function dayDates(trip: TripBook): Array<Date | null> {
+  const start = tripStart(trip);
+  if (start) {
+    // startDate wins: a label date is only trusted when it lands on/after the
+    // start (gaps allowed); otherwise day N = start + N.
+    let previous: Date | null = null;
+    return trip.days.map((day, index) => {
+      const fallback = new Date(start.getFullYear(), start.getMonth(), start.getDate() + index);
+      const parsed = monthDay(`${day.label} ${day.title}`) || monthDay(day.id);
+      let date = fallback;
+      if (parsed && parsed.month >= 1 && parsed.day >= 1 && parsed.day <= 31) {
+        let year = (previous || start).getFullYear();
+        let guess = new Date(year, parsed.month - 1, parsed.day);
+        if (guess < (previous || start)) guess = new Date((year += 1), parsed.month - 1, parsed.day);
+        const sane = guess.getMonth() === parsed.month - 1 && guess.getTime() - start.getTime() < 120 * 86_400_000;
+        if (sane && (!previous || guess > previous)) date = guess;
+      }
+      if (previous && date <= previous) date = new Date(previous.getFullYear(), previous.getMonth(), previous.getDate() + 1);
+      previous = date;
+      return date;
+    });
+  }
   let year = tripYear(trip);
   let previous: Date | null = null;
   return trip.days.map((day) => {
@@ -1241,6 +1309,22 @@ export function parseTripBook(value: unknown): TripBook {
       .filter((guide) => guide.id && guide.label),
     footer: asString(raw.footer),
   };
+  const startDate = asString(raw.startDate).trim();
+  if (startDate && tripStart({ startDate })) trip.startDate = startDate;
+  const cityNames: Record<string, string> = {};
+  if (raw.cityNames && typeof raw.cityNames === "object" && !Array.isArray(raw.cityNames)) {
+    for (const [code, name] of Object.entries(raw.cityNames as Record<string, unknown>)) {
+      const label = asString(name).trim().slice(0, 40);
+      if (code.trim() && label) cityNames[code.trim().toLowerCase().replace(/\s+/g, "")] = label;
+    }
+  }
+  daysRaw.forEach((item) => {
+    const row = (item || {}) as Record<string, unknown>;
+    const code = asString(row.city).trim().toLowerCase().replace(/\s+/g, "");
+    const label = asString(row.cityName).trim().slice(0, 40);
+    if (code && label && !cityNames[code]) cityNames[code] = label;
+  });
+  if (Object.keys(cityNames).length) trip.cityNames = cityNames;
   trip.days = attachRides(trip.days, trip.transport.blocks);
   const hasBody =
     trip.overviewHtml ||
@@ -1603,6 +1687,64 @@ export function deleteTrip(current: TripBook[], id: string): TripBook[] {
   return trips;
 }
 
+/** Everything deleteTrip removes for one trip, so a delete can be undone. */
+export type TripSnapshot = {
+  trip: TripBook;
+  index: number;
+  notes?: Record<string, string>;
+  checks?: Record<string, boolean>;
+  visits?: Record<string, string>;
+  extras?: ExtraStop[];
+  wishes?: WishPlace[];
+};
+
+export function snapshotTrip(current: TripBook[], id: string): TripSnapshot | null {
+  const index = current.findIndex((trip) => trip.id === id);
+  if (index < 0) return null;
+  return {
+    trip: current[index],
+    index,
+    notes: loadAllNotes()[id],
+    checks: readCheckMap()[id],
+    visits: readVisitMap()[id],
+    extras: readExtraMap()[id],
+    wishes: readWishMap()[id],
+  };
+}
+
+export function restoreTrip(current: TripBook[], snap: TripSnapshot): TripBook[] {
+  const trips = current.filter((trip) => trip.id !== snap.trip.id);
+  trips.splice(Math.min(snap.index, trips.length), 0, snap.trip);
+  saveTrips(trips);
+  const put = (key: string, map: Record<string, unknown>, value: unknown) => {
+    if (value === undefined) return;
+    map[snap.trip.id] = value;
+    localStorage.setItem(key, JSON.stringify(map));
+  };
+  put(NOTES_KEY, loadAllNotes(), snap.notes);
+  put(CHECKS_KEY, readCheckMap(), snap.checks);
+  put(VISITS_KEY, readVisitMap(), snap.visits);
+  put(EXTRAS_KEY, readExtraMap(), snap.extras);
+  put(WISHES_KEY, readWishMap(), snap.wishes);
+  return trips;
+}
+
+/** Library order: ongoing first, then upcoming by countdown, then undated,
+ *  then finished. Stable within each group. */
+export function sortTrips(trips: TripBook[], now = new Date()): TripBook[] {
+  const rank = (trip: TripBook): [number, number] => {
+    const timing = tripTiming(trip, now);
+    if (timing?.kind === "now") return [0, 0];
+    if (timing?.kind === "soon") return [1, timing.days];
+    if (!timing) return [2, 0];
+    return [3, 0];
+  };
+  return trips
+    .map((trip, order) => ({ trip, order, key: rank(trip) }))
+    .sort((a, b) => a.key[0] - b.key[0] || a.key[1] - b.key[1] || a.order - b.order)
+    .map((item) => item.trip);
+}
+
 function loadAllNotes(): NoteMap {
   try {
     const raw = localStorage.getItem(NOTES_KEY);
@@ -1909,4 +2051,45 @@ export function mapEntryTargets(day: TripDay): MapEntryTarget[] {
       },
     ];
   });
+}
+
+export type NextStop = {
+  entry: DayEntry;
+  num: number;
+  key: string;
+  /** Ride leading into this stop, when the plan has one. */
+  ride: Ride | null;
+  done: number;
+  total: number;
+};
+
+/** First not-yet-checked-in stop of the day, in plan order (spots, meals and
+ *  hotels). `next` is null when every stop is checked in (or there are none). */
+export function nextStop(day: TripDay, visits: Record<string, string>): { next: NextStop | null; done: number; total: number } {
+  const items = planItems(day);
+  let ride: Ride | null = null;
+  let done = 0;
+  let total = 0;
+  let next: NextStop | null = null;
+  for (const item of items) {
+    if (item.kind === "ride") {
+      ride = item.ride;
+      continue;
+    }
+    const key =
+      item.kind === "spot"
+        ? visitKey(day.id, item.index)
+        : item.kind === "meal"
+          ? mealVisitKey(day.id, item.index)
+          : hotelVisitKey(day.id, item.index);
+    total += 1;
+    if (visits[key]) done += 1;
+    else if (!next) next = { entry: { kind: item.kind, index: item.index }, num: item.num, key, ride, done: 0, total: 0 };
+    ride = null;
+  }
+  if (next) {
+    next.done = done;
+    next.total = total;
+  }
+  return { next, done, total };
 }
