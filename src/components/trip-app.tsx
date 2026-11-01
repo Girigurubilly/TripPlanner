@@ -79,7 +79,7 @@ import { t } from "@/lib/i18n";
 import { DrivePanel } from "@/components/drive-panel";
 import { syncTripDriveIfDue } from "@/lib/drive-sync";
 import { AI_TRIP_PROMPT, wishUpdatePrompt } from "@/lib/ai-prompt";
-import { LOGGED_KEY, MONEY_WINDOW, dayCostItems, dayIdForDate, formatSpend, moneyEstimateUrl, rideRef, rideSpendLabel, tripCosts, tripEstimate, type SpendItem, type TripCosts, loadLoggedKeys, loadMoneyLinks, loadSentKeys, markSent, moneyLinkBackUrl, moneySpendUrl, moneyTripIdForBook, rankTripBooks, readMoneyRef, rememberMoneyRef, saveMoneyLink, spendItem, spendTimeHint, type MoneyTripRef, type SpendCategory } from "@/lib/money-link";
+import { LOGGED_KEY, MONEY_WINDOW, openMoney, plainClick, dayCostItems, dayIdForDate, formatSpend, moneyEstimateUrl, rideRef, rideSpendLabel, tripCosts, tripEstimate, type SpendItem, type TripCosts, loadLoggedKeys, loadMoneyLinks, loadSentKeys, markSent, moneyLinkBackUrl, moneySpendUrl, moneyTripIdForBook, rankTripBooks, readMoneyRef, rememberMoneyRef, saveMoneyLink, spendItem, spendTimeHint, type MoneyTripRef, type SpendCategory } from "@/lib/money-link";
 import { placeFromMaps, resolveMapsPlace, shortMapsLink } from "@/lib/maps-place";
 import { startLocate, type PlaceFix } from "@/lib/geo";
 
@@ -664,11 +664,7 @@ export function TripApp() {
                             if (moneyAsk.pick) {
                               // Reuse the MoneyTracker tab (window name "money-tracker") instead of replacing this one.
                               const back = moneyLinkBackUrl(moneyAsk, trip.id, trip.title);
-                              const win = window.open(back, MONEY_WINDOW);
-                              if (!win) {
-                                window.location.assign(back);
-                                return;
-                              }
+                              if (openMoney(back) === "here") return;
                             }
                             setMoneyAsk(null);
                             const opened = focusDay(trip, moneyAsk.day);
@@ -2436,15 +2432,19 @@ function SpotMoney({
     );
   }
   const sent = Boolean(key && marks.sent.has(key));
+  const href = moneySpendUrl({ trip: trip.title, tripId: moneyTripIdForBook(trip.id), bookId: trip.id, items: [item] });
   return (
     <a
       className={compact ? "money-spot" : "btn primary money-send"}
-      href={moneySpendUrl({ trip: trip.title, tripId: moneyTripIdForBook(trip.id), bookId: trip.id, items: [item] })}
+      href={href}
       target={MONEY_WINDOW}
       onClick={(event) => {
         event.stopPropagation();
         markSent(key);
         marks.bump();
+        if (!plainClick(event)) return;
+        event.preventDefault();
+        openMoney(href);
       }}
     >
       {compact ? (sent ? "已送出" : "入帳") : sent ? "已送去理財，未確認" : "將呢項交去理財確認"}
@@ -2485,16 +2485,20 @@ function DayMoneyBatch({ trip, day, items: given, compact }: { trip: TripBook; d
   }
   const today = items[0]?.date === localToday();
   const sent = batch.every((item) => marks.sent.has(item.key || ""));
+  const href = moneySpendUrl({ trip: trip.title, tripId: moneyTripIdForBook(trip.id), bookId: trip.id, items: batch });
   return (
     <div className={compact ? "day-money compact" : "day-money"}>
       <a
         className="btn primary money-send"
-        href={moneySpendUrl({ trip: trip.title, tripId: moneyTripIdForBook(trip.id), bookId: trip.id, items: batch })}
+        href={href}
         target={MONEY_WINDOW}
         onClick={(event) => {
           event.stopPropagation();
           for (const item of batch) markSent(item.key || "");
           marks.bump();
+          if (!plainClick(event)) return;
+          event.preventDefault();
+          openMoney(href);
         }}
       >
         {sent ? "已送去理財，未確認 · 再開" : today ? `記低今日開支（${batch.length} 項）` : `記低呢日開支（${batch.length} 項）`}
@@ -2539,7 +2543,16 @@ function CostsScreen({ trip, costs, onDay }: { trip: TripBook; costs: TripCosts;
             {costs.count} 項有價錢 · 已記入理財 {loggedCount}／{costs.count}
             {costs.guessCount ? ` · ${costs.guessCount} 項冇寫明貨幣，暫當 ${costs.currency || "HKD"}` : ""}
           </p>
-          <a className="btn primary money-send" href={moneyEstimateUrl(estimate)} target={MONEY_WINDOW}>
+          <a
+            className="btn primary money-send"
+            href={moneyEstimateUrl(estimate)}
+            target={MONEY_WINDOW}
+            onClick={(event) => {
+              if (!plainClick(event)) return;
+              event.preventDefault();
+              openMoney(moneyEstimateUrl(estimate));
+            }}
+          >
             送去理財做旅程預算
           </a>
           <p className="soft-hint">理財會用佢嘅匯率換成港幣，等你對比或者設定呢個旅程嘅預算。只計有寫價錢嘅項目。</p>

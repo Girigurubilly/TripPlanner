@@ -47,6 +47,50 @@ export const LOGGED_KEY = "money-trip-logged";
 const SENT_KEY = "tripbook-money-sent";
 export const MONEY_WINDOW = "money-tracker";
 
+/** True when this page runs as an iPhone/Android Home Screen app (no tabs to switch to). */
+function standaloneApp(): boolean {
+  try {
+    return (navigator as Navigator & { standalone?: boolean }).standalone === true || window.matchMedia?.("(display-mode: standalone)").matches === true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Open MoneyTracker at `url` (a #proposal= / #estimate= link) and bring it to the front.
+ * - Normal browser: reuse/open the "money-tracker" tab via window.open and focus it.
+ *   Plain `<a target>` alone can update a background tab without switching to it (looks like nothing happened).
+ * - Pop-up blocked, window.open unavailable, or a Home Screen app: go there in this tab instead,
+ *   so Money always opens with the hash.
+ * Returns how it went so callers can report it.
+ */
+export function openMoney(url: string): "tab" | "here" {
+  if (typeof window === "undefined") return "here";
+  if (!standaloneApp()) {
+    let win: Window | null = null;
+    try {
+      win = window.open(url, MONEY_WINDOW);
+    } catch {
+      win = null;
+    }
+    if (win) {
+      try {
+        win.focus();
+      } catch {
+        /* ignore */
+      }
+      return "tab";
+    }
+  }
+  window.location.assign(url);
+  return "here";
+}
+
+/** Let ⌘/Ctrl/Shift/middle clicks keep the browser's own link handling. */
+export function plainClick(event: { button?: number; metaKey?: boolean; ctrlKey?: boolean; shiftKey?: boolean; altKey?: boolean }): boolean {
+  return (event.button ?? 0) === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey;
+}
+
 function slugPart(value: string): string {
   return value.trim().replace(/\s+/g, "-").replace(/:/g, "-").slice(0, 60);
 }
