@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { dayIdForDate, moneyLinkBackUrl, moneySpendUrl, parsePrice, rankTripBooks, readMoneyRef, spendItem, spendOnDay, spendTimeHint } from "./money-link.ts";
+import { dayIdForDate, moneyLinkBackUrl, moneySpendUrl, parsePrice, rankTripBooks, readMoneyRef, spendItem, spendItemKey, spendOnDay, spendTimeHint } from "./money-link.ts";
 import type { TripBook } from "./trip.ts";
 
 function book(patch: Partial<TripBook> & Pick<TripBook, "id" | "title">): TripBook {
@@ -55,6 +55,9 @@ describe("money link", () => {
     assert.equal(spendItem(osaka, osaka.days[0], "通天閣", "¥800")?.amount, 800);
     assert.equal(spendItem(osaka, osaka.days[0], "通天閣", "免費"), null);
     assert.equal(spendItem(osaka, osaka.days[0], "通天閣", "免費", true)?.amount, 0);
+    assert.equal(spendItem(osaka, osaka.days[0], "通天閣", "¥800", false, "sight", "", "d1-sight-1")?.key, "osaka-book:d1:d1-sight-1");
+    assert.equal(spendItem(osaka, osaka.days[0], "南海 特急", "¥930", false, "ride")?.key, "osaka-book:d1:ride:南海-特急");
+    assert.equal(spendItemKey("b", "d", "meal", "", "a:b"), "b:d:meal:a-b");
     assert.equal(spendItem(osaka, osaka.days[0], "通天閣", "", true)?.currency, "HKD");
     assert.equal(items[0]?.date, "2026-04-02");
     assert.equal(items.find((item) => item.label === "通天閣")?.category, "sight");

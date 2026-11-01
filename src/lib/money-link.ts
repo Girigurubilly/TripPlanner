@@ -26,7 +26,61 @@ export type SpendItem = {
   category?: SpendCategory;
   /** Optional HH:mm for the meal/event — Money should not use wall-clock now. */
   time?: string;
+  /** Stable item key (bookId:dayId:entryId, or bookId:dayId:kind:label). Money stores it to skip duplicates. */
+  key?: string;
 };
+
+/**
+ * Contract with MoneyTracker (same origin, girigurubilly.github.io → shared localStorage):
+ * - Each proposal item carries `key` (see spendItemKey).
+ * - MoneyTracker saves the key on the ledger rows it creates and rewrites
+ *   localStorage["money-trip-logged"] = { v: 1, keys: string[], at } from its ledger.
+ *   TripPlanner only reads it (✓ 已記) and listens for `storage` events.
+ * - TripPlanner keeps its own "sent but not confirmed yet" set in SENT_KEY (best-effort hint only).
+ * - Windows: TripPlanner names itself "trip-planner"; MoneyTracker names itself "money-tracker".
+ *   Links between the two use those names as targets so each app reuses its own tab.
+ * Note: an iPhone Home Screen app has storage separate from Safari, so ✓ only shows where both share storage.
+ */
+export const LOGGED_KEY = "money-trip-logged";
+const SENT_KEY = "tripbook-money-sent";
+export const MONEY_WINDOW = "money-tracker";
+
+function slugPart(value: string): string {
+  return value.trim().replace(/\s+/g, "-").replace(/:/g, "-").slice(0, 60);
+}
+
+export function spendItemKey(bookId: string, dayId: string, kind: string, ref: string, label: string): string {
+  const tail = ref ? slugPart(ref) : `${kind || "other"}:${slugPart(label)}`;
+  return `${slugPart(bookId)}:${slugPart(dayId)}:${tail}`.slice(0, 160);
+}
+
+export function loadLoggedKeys(): Set<string> {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(LOGGED_KEY) || "{}") as { keys?: unknown };
+    return new Set(Array.isArray(parsed.keys) ? parsed.keys.filter((key): key is string => typeof key === "string") : []);
+  } catch {
+    return new Set();
+  }
+}
+
+export function loadSentKeys(): Set<string> {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(SENT_KEY) || "[]") as unknown;
+    return new Set(Array.isArray(parsed) ? parsed.filter((key): key is string => typeof key === "string") : []);
+  } catch {
+    return new Set();
+  }
+}
+
+export function markSent(key: string): void {
+  if (!key) return;
+  try {
+    const keys = [...loadSentKeys(), key].slice(-300);
+    localStorage.setItem(SENT_KEY, JSON.stringify([...new Set(keys)]));
+  } catch {
+    /* ignore */
+  }
+}
 
 export function readMoneyRef(search: string): MoneyTripRef | null {
   const q = new URLSearchParams(search.startsWith("?") ? search.slice(1) : search);
@@ -182,6 +236,7 @@ export function spendItem(
   blank = false,
   category?: SpendCategory,
   time = "",
+  ref = "",
 ): SpendItem | null {
   const index = trip.days.findIndex((item) => item.id === day.id);
   const date = dayDates(trip)[index];
@@ -193,6 +248,7 @@ export function spendItem(
   const base = {
     ...(category ? { category } : {}),
     ...(clock ? { time: clock } : {}),
+    key: spendItemKey(trip.id, day.id, category || "other", ref, name),
   };
   if (!parsed) {
     if (!blank) return null;

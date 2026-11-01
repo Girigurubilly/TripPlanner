@@ -69,7 +69,7 @@ import {
 import { DrivePanel } from "@/components/drive-panel";
 import { syncTripDriveIfDue } from "@/lib/drive-sync";
 import { AI_TRIP_PROMPT, wishUpdatePrompt } from "@/lib/ai-prompt";
-import { dayIdForDate, loadMoneyLinks, moneyLinkBackUrl, moneySpendUrl, moneyTripIdForBook, rankTripBooks, readMoneyRef, rememberMoneyRef, saveMoneyLink, spendItem, spendTimeHint, type MoneyTripRef, type SpendCategory } from "@/lib/money-link";
+import { LOGGED_KEY, MONEY_WINDOW, dayIdForDate, loadLoggedKeys, loadMoneyLinks, loadSentKeys, markSent, moneyLinkBackUrl, moneySpendUrl, moneyTripIdForBook, rankTripBooks, readMoneyRef, rememberMoneyRef, saveMoneyLink, spendItem, spendTimeHint, type MoneyTripRef, type SpendCategory } from "@/lib/money-link";
 import { placeFromMaps, resolveMapsPlace, shortMapsLink } from "@/lib/maps-place";
 import { startLocate, type PlaceFix } from "@/lib/geo";
 
@@ -619,8 +619,13 @@ export function TripApp() {
                             saveMoneyLink(moneyAsk.id, trip.id);
                             rememberMoneyRef({ ...moneyAsk, book: trip.id });
                             if (moneyAsk.pick) {
-                              window.location.assign(moneyLinkBackUrl(moneyAsk, trip.id, trip.title));
-                              return;
+                              // Reuse the MoneyTracker tab (window name "money-tracker") instead of replacing this one.
+                              const back = moneyLinkBackUrl(moneyAsk, trip.id, trip.title);
+                              const win = window.open(back, MONEY_WINDOW);
+                              if (!win) {
+                                window.location.assign(back);
+                                return;
+                              }
                             }
                             setMoneyAsk(null);
                             const opened = focusDay(trip, moneyAsk.day);
@@ -1075,7 +1080,7 @@ function Book({
               </dl>
             ) : null}
             {activeDay && detailItem ? (
-              <SpotMoney trip={trip} day={activeDay} label={detailItem.name} price={spotView?.price || detailItem.price} blank category={entryMeal ? "meal" : entryHotel ? "hotel" : "sight"} slot={entryMeal?.slot} hours={entryMeal?.hours || spotView?.hours || detailItem.hours} />
+              <SpotMoney trip={trip} day={activeDay} itemRef={detailItem.id} label={detailItem.name} price={spotView?.price || detailItem.price} blank category={entryMeal ? "meal" : entryHotel ? "hotel" : "sight"} slot={entryMeal?.slot} hours={entryMeal?.hours || spotView?.hours || detailItem.hours} />
             ) : null}
             {detailItem.image ? (
               <figure className="spot-figure">
@@ -1205,7 +1210,7 @@ function Book({
                           <button className="ghost" type="button" onClick={() => { setEntryAt({ kind: "meal", index }); window.scrollTo({ top: 0 }); }}>
                             詳情
                           </button>
-                          <SpotMoney trip={trip} day={activeDay} label={meal.name} price={meal.price} compact blank category="meal" slot={meal.slot} hours={meal.hours} />
+                          <SpotMoney trip={trip} day={activeDay} itemRef={meal.id} label={meal.name} price={meal.price} compact blank category="meal" slot={meal.slot} hours={meal.hours} />
                         </div>
                       </article>
                     ))}
@@ -2079,7 +2084,7 @@ function DayScreen({
                           <small className="stop-addr">{[mealItem.address, mealItem.price].filter(Boolean).join(" · ")}</small>
                         ) : null}
                         {at ? <span className="pill-hint">{visitClock(at)} 已去</span> : null}
-                        <SpotMoney trip={trip} day={day} label={mealItem.name} price={mealItem.price} compact blank category="meal" slot={mealItem.slot} hours={mealItem.hours} />
+                        <SpotMoney trip={trip} day={day} itemRef={mealItem.id} label={mealItem.name} price={mealItem.price} compact blank category="meal" slot={mealItem.slot} hours={mealItem.hours} />
                       </span>
                       <button
                         className={at ? "stamp on" : "stamp"}
@@ -2159,7 +2164,7 @@ function DayScreen({
                         <small className="stop-addr">{[spotItem.address, spotItem.price].filter(Boolean).join(" · ")}</small>
                       ) : null}
                       {at ? <span className="pill-hint">{visitClock(at)} 已去</span> : null}
-                      <SpotMoney trip={trip} day={day} label={spotItem.name} price={spotItem.price} compact blank category="sight" hours={spotItem.hours} />
+                      <SpotMoney trip={trip} day={day} itemRef={spotItem.id} label={spotItem.name} price={spotItem.price} compact blank category="sight" hours={spotItem.hours} />
                     </span>
                     <button
                       className={at ? "stamp on" : "stamp"}
@@ -2254,6 +2259,7 @@ function SpotMoney({
   time,
   slot,
   hours,
+  itemRef,
 }: {
   trip: TripBook;
   day: TripDay;
@@ -2265,21 +2271,61 @@ function SpotMoney({
   time?: string;
   slot?: string;
   hours?: string;
+  /** Stable entry id (spot/meal/hotel id) so the same item gets the same key everywhere. */
+  itemRef?: string;
 }) {
+  const marks = useMoneyMarks();
   const clock = time || spendTimeHint(slot || "", hours || "");
-  const item = spendItem(trip, day, label, price, blank, category, clock);
+  const item = spendItem(trip, day, label, price, blank, category, clock, itemRef || "");
   if (!item) return null;
+  const key = item.key || "";
+  if (key && marks.logged.has(key)) {
+    return (
+      <span className={compact ? "money-spot logged" : "btn money-send logged"} onClick={(event) => event.stopPropagation()}>
+        {compact ? "✓ 已記" : "✓ 已記入理財"}
+      </span>
+    );
+  }
+  const sent = Boolean(key && marks.sent.has(key));
   return (
     <a
       className={compact ? "money-spot" : "btn primary money-send"}
       href={moneySpendUrl({ trip: trip.title, tripId: moneyTripIdForBook(trip.id), bookId: trip.id, items: [item] })}
-      target="_blank"
-      rel="noopener noreferrer"
-      onClick={(event) => event.stopPropagation()}
+      target={MONEY_WINDOW}
+      onClick={(event) => {
+        event.stopPropagation();
+        markSent(key);
+        marks.bump();
+      }}
     >
-      {compact ? "入帳" : "將呢項交去理財確認"}
+      {compact ? (sent ? "已送出" : "入帳") : sent ? "已送去理財，未確認" : "將呢項交去理財確認"}
     </a>
   );
+}
+
+/** ✓ 已記 from MoneyTracker's shared key list; refreshes on storage events and when the tab regains focus. */
+function useMoneyMarks() {
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    const bump = () => setTick((n) => n + 1);
+    const onStorage = (event: StorageEvent) => {
+      if (!event.key || event.key === LOGGED_KEY) bump();
+    };
+    const onVisible = () => {
+      if (document.visibilityState === "visible") bump();
+    };
+    window.addEventListener("storage", onStorage);
+    window.addEventListener("focus", bump);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.removeEventListener("storage", onStorage);
+      window.removeEventListener("focus", bump);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const marks = useMemo(() => ({ logged: loadLoggedKeys(), sent: loadSentKeys() }), [tick]);
+  return { ...marks, bump: () => setTick((n) => n + 1) };
 }
 
 function RideCard({
@@ -2337,7 +2383,7 @@ function RideCard({
         </button>
       )}
       {trip && day ? (
-        <SpotMoney trip={trip} day={day} label={ride.detail || `${ride.from} → ${ride.to}`} price={ride.price} compact category="ride" />
+        <SpotMoney trip={trip} day={day} itemRef={`ride-${ride.from}-${ride.to}`} label={ride.detail || `${ride.from} → ${ride.to}`} price={ride.price} compact category="ride" />
       ) : null}
     </div>
   );
