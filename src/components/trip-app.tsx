@@ -69,7 +69,7 @@ import {
 import { DrivePanel } from "@/components/drive-panel";
 import { syncTripDriveIfDue } from "@/lib/drive-sync";
 import { AI_TRIP_PROMPT, wishUpdatePrompt } from "@/lib/ai-prompt";
-import { LOGGED_KEY, MONEY_WINDOW, dayIdForDate, loadLoggedKeys, loadMoneyLinks, loadSentKeys, markSent, moneyLinkBackUrl, moneySpendUrl, moneyTripIdForBook, rankTripBooks, readMoneyRef, rememberMoneyRef, saveMoneyLink, spendItem, spendTimeHint, type MoneyTripRef, type SpendCategory } from "@/lib/money-link";
+import { LOGGED_KEY, MONEY_WINDOW, dayCostItems, dayIdForDate, formatSpend, moneyEstimateUrl, rideRef, rideSpendLabel, tripCosts, tripEstimate, type SpendItem, type TripCosts, loadLoggedKeys, loadMoneyLinks, loadSentKeys, markSent, moneyLinkBackUrl, moneySpendUrl, moneyTripIdForBook, rankTripBooks, readMoneyRef, rememberMoneyRef, saveMoneyLink, spendItem, spendTimeHint, type MoneyTripRef, type SpendCategory } from "@/lib/money-link";
 import { placeFromMaps, resolveMapsPlace, shortMapsLink } from "@/lib/maps-place";
 import { startLocate, type PlaceFix } from "@/lib/geo";
 
@@ -841,6 +841,8 @@ function Book({
         ? activeTab
         : "overview";
 
+  const costs = useMemo(() => tripCosts(trip), [trip]);
+
   useEffect(() => {
     if (pendingEntry.current === undefined) {
       setEntryAt(null);
@@ -942,6 +944,7 @@ function Book({
   else if (rootTab === "days" && activeDay) screenTitle = activeDay.label || activeDay.title;
   else if (rootTab === "transport") screenTitle = "交通";
   else if (rootTab === "map") screenTitle = "地圖";
+  else if (activeTab === "costs") screenTitle = "費用";
   else if (rootTab === "eat") screenTitle = "美食手信";
   else if (topic) screenTitle = topic.title;
   else if (openGuide) screenTitle = openGuide.label;
@@ -1001,6 +1004,11 @@ function Book({
       onTab("guides");
       return;
     }
+    if (activeTab === "costs") {
+      onTab("overview");
+      window.scrollTo({ top: 0 });
+      return;
+    }
     onBack();
   }
 
@@ -1016,7 +1024,7 @@ function Book({
   return (
     <div className="app book app-shell" onClick={onContentClick}>
       <header className="topbar">
-        <button className="icon-btn" type="button" aria-label={searching || detailItem || topic || openGuide ? "返回" : "返回行程庫"} onClick={goBack}>
+        <button className="icon-btn" type="button" aria-label={searching || detailItem || topic || openGuide || activeTab === "costs" ? "返回" : "返回行程庫"} onClick={goBack}>
           <ChevronLeft size={20} aria-hidden="true" />
         </button>
         {searching ? (
@@ -1101,7 +1109,19 @@ function Book({
           </article>
         ) : null}
 
-        {!searching && !detailItem && rootTab === "overview" ? (
+        {!searching && !detailItem && activeTab === "costs" ? (
+          <CostsScreen
+            trip={trip}
+            costs={costs}
+            onDay={(id) => {
+              onDay(id);
+              onTab("days");
+              window.scrollTo({ top: 0 });
+            }}
+          />
+        ) : null}
+
+        {!searching && !detailItem && rootTab === "overview" && activeTab !== "costs" ? (
           <article className="screen reading">
             <h1 className="screen-title">{trip.title}</h1>
             {trip.subtitle ? <p className="lede">{trip.subtitle}</p> : null}
@@ -1132,6 +1152,22 @@ function Book({
                   <span style={{ width: `${Math.round((progress.done / progress.total) * 100)}%` }} />
                 </div>
               </>
+            ) : null}
+            {costs.count ? (
+              <button
+                className="cost-entry"
+                type="button"
+                onClick={() => {
+                  onTab("costs");
+                  window.scrollTo({ top: 0 });
+                }}
+              >
+                <span>
+                  <b>費用</b>
+                  <small>{costs.count} 項有價錢 · 每日預計同送去理財</small>
+                </span>
+                <strong>{totalsLine(costs.totals)}</strong>
+              </button>
             ) : null}
             <Overview html={trip.overviewHtml} tripId={trip.id} />
           </article>
@@ -1348,7 +1384,7 @@ function Book({
         ) : null}
 
         {trip.footer && !searching && !detailItem && topicAt === null && rootTab !== "map" ? <p className="foot">{trip.footer}</p> : null}
-        {!searching && !detailItem && topicAt === null && rootTab === "overview" ? (
+        {!searching && !detailItem && topicAt === null && rootTab === "overview" && activeTab !== "costs" ? (
           <button className="btn save-trip" type="button" onClick={() => void downloadTrip(trip)}>
             <Download size={18} aria-hidden="true" />
             儲存行程
@@ -1991,6 +2027,7 @@ function DayScreen({
         </div>
       ) : null}
       <DayFacts day={day} />
+      <DayMoneyBatch trip={trip} day={day} />
       <div ref={readRef}>
         {day.leadHtml ? (
           leadLong(day.leadHtml) ? (
@@ -2303,6 +2340,131 @@ function SpotMoney({
   );
 }
 
+const COST_KIND_LABEL: Record<string, string> = { hotel: "住宿", ride: "交通", meal: "餐飲", sight: "景點", other: "其他" };
+
+function totalsLine(totals: TripCosts["totals"] | Record<string, number>): string {
+  return Object.entries(totals)
+    .map(([currency, value]) => formatSpend(typeof value === "number" ? value : value.all, currency))
+    .join(" + ");
+}
+
+function localToday(): string {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+}
+
+/** 「記低今日開支」: one tap sends every unlogged priced item on this day to Money's multi-row sheet. */
+function DayMoneyBatch({ trip, day, items: given, compact }: { trip: TripBook; day: TripDay; items?: SpendItem[]; compact?: boolean }) {
+  const marks = useMoneyMarks();
+  const items = given || dayCostItems(trip, day);
+  if (!items.length) return null;
+  const pending = items.filter((item) => !marks.logged.has(item.key || ""));
+  const batch = pending.slice(0, 20);
+  const totals: Record<string, number> = {};
+  for (const item of items) totals[item.currency] = (totals[item.currency] || 0) + item.amount;
+  const logged = items.length - pending.length;
+  if (!pending.length) {
+    return (
+      <div className={compact ? "day-money compact" : "day-money"}>
+        <span className="btn money-send logged">✓ 全部已記入理財（{items.length} 項）</span>
+        {compact ? null : <p className="soft-hint">預計 {totalsLine(totals)}</p>}
+      </div>
+    );
+  }
+  const today = items[0]?.date === localToday();
+  const sent = batch.every((item) => marks.sent.has(item.key || ""));
+  return (
+    <div className={compact ? "day-money compact" : "day-money"}>
+      <a
+        className="btn primary money-send"
+        href={moneySpendUrl({ trip: trip.title, tripId: moneyTripIdForBook(trip.id), bookId: trip.id, items: batch })}
+        target={MONEY_WINDOW}
+        onClick={(event) => {
+          event.stopPropagation();
+          for (const item of batch) markSent(item.key || "");
+          marks.bump();
+        }}
+      >
+        {sent ? "已送去理財，未確認 · 再開" : today ? `記低今日開支（${batch.length} 項）` : `記低呢日開支（${batch.length} 項）`}
+      </a>
+      <p className="soft-hint">
+        預計 {totalsLine(totals)}
+        {logged ? ` · 已記 ${logged} 項` : ""}
+        {pending.length > batch.length ? ` · 一次最多 20 項，記完再撳一次` : ""}
+        {batch.some((item) => item.currencyGuess) ? " · 有項目冇寫貨幣，理財會提你核對" : ""}
+      </p>
+    </div>
+  );
+}
+
+function CostsScreen({ trip, costs, onDay }: { trip: TripBook; costs: TripCosts; onDay: (id: string) => void }) {
+  const marks = useMoneyMarks();
+  const estimate = useMemo(() => tripEstimate(trip, costs), [trip, costs]);
+  const all = costs.days.flatMap((row) => row.items);
+  const loggedCount = all.filter((item) => marks.logged.has(item.key || "")).length;
+  const kinds = ["hotel", "ride", "meal", "sight", "other"] as const;
+  return (
+    <article className="screen reading costs">
+      <h1 className="screen-title">費用</h1>
+      {!costs.count ? <p className="lede">呢本行程未有寫價錢嘅項目。喺景點、餐廳、住宿或交通寫低價錢，就會喺度計數。</p> : null}
+      {costs.count ? (
+        <section className="cost-card">
+          <p className="cost-label">全程預計</p>
+          <p className="cost-total">{totalsLine(costs.totals)}</p>
+          <ul className="cost-kinds">
+            {Object.entries(costs.totals).flatMap(([currency, bucket]) =>
+              kinds
+                .filter((kind) => (bucket[kind] || 0) > 0)
+                .map((kind) => (
+                  <li key={`${currency}-${kind}`}>
+                    <span>{COST_KIND_LABEL[kind]}</span>
+                    <b>{formatSpend(bucket[kind] || 0, currency)}</b>
+                  </li>
+                )),
+            )}
+          </ul>
+          <p className="soft-hint">
+            {costs.count} 項有價錢 · 已記入理財 {loggedCount}／{costs.count}
+            {costs.guessCount ? ` · ${costs.guessCount} 項冇寫明貨幣，暫當 ${costs.currency || "HKD"}` : ""}
+          </p>
+          <a className="btn primary money-send" href={moneyEstimateUrl(estimate)} target={MONEY_WINDOW}>
+            送去理財做旅程預算
+          </a>
+          <p className="soft-hint">理財會用佢嘅匯率換成港幣，等你對比或者設定呢個旅程嘅預算。只計有寫價錢嘅項目。</p>
+        </section>
+      ) : null}
+      {costs.days.map((row) => {
+        if (!row.items.length) return null;
+        return (
+          <section className="cost-day" key={row.day.id}>
+            <button className="cost-day-head" type="button" onClick={() => onDay(row.day.id)}>
+              <span>
+                <b>{row.day.label || row.day.title}</b>
+                {row.day.title && row.day.label ? <small>{row.day.title}</small> : null}
+              </span>
+              <strong>{totalsLine(row.totals)}</strong>
+            </button>
+            <ul className="cost-items">
+              {row.items.map((item) => (
+                <li key={item.key} className={marks.logged.has(item.key || "") ? "logged" : ""}>
+                  <span className="cost-kind">{COST_KIND_LABEL[item.category || "other"]}</span>
+                  <span className="cost-name">{item.label}</span>
+                  <b>
+                    {marks.logged.has(item.key || "") ? "✓ " : ""}
+                    {formatSpend(item.amount, item.currency)}
+                    {item.currencyGuess ? "?" : ""}
+                  </b>
+                </li>
+              ))}
+            </ul>
+            <DayMoneyBatch trip={trip} day={row.day} items={row.items} compact />
+          </section>
+        );
+      })}
+    </article>
+  );
+}
+
 /** ✓ 已記 from MoneyTracker's shared key list; refreshes on storage events and when the tab regains focus. */
 function useMoneyMarks() {
   const [tick, setTick] = useState(0);
@@ -2383,7 +2545,7 @@ function RideCard({
         </button>
       )}
       {trip && day ? (
-        <SpotMoney trip={trip} day={day} itemRef={`ride-${ride.from}-${ride.to}`} label={ride.detail || `${ride.from} → ${ride.to}`} price={ride.price} compact category="ride" />
+        <SpotMoney trip={trip} day={day} itemRef={rideRef(ride)} label={rideSpendLabel(ride)} price={ride.price} compact category="ride" />
       ) : null}
     </div>
   );

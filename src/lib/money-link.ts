@@ -28,6 +28,8 @@ export type SpendItem = {
   time?: string;
   /** Stable item key (bookId:dayId:entryId, or bookId:dayId:kind:label). Money stores it to skip duplicates. */
   key?: string;
+  /** No clear currency marker — Money flags the row so the user checks the currency. */
+  currencyGuess?: true;
 };
 
 /**
@@ -177,29 +179,109 @@ export function rankTripBooks(
   return { best: null, options: scored.map((row) => row.trip) };
 }
 
-export function parsePrice(raw: string): { amount: number; currency: string } | null {
+/** Currencies MoneyTracker understands (keep in step with its CURRENCIES list). */
+export const MONEY_CURRENCIES = ["HKD", "USD", "JPY", "CNY", "TWD", "THB", "GBP", "EUR", "AUD", "SGD", "CHF", "MOP", "KRW", "CAD", "NZD", "INR"] as const;
+
+const DOLLARS = new Set(["HKD", "USD", "TWD", "SGD", "AUD", "CAD", "NZD", "MOP"]);
+
+/** Explicit markers, most specific first (HK$ before $, 澳門幣 before 澳幣 …). */
+const CURRENCY_MARKS: [string, RegExp][] = [
+  ["HKD", /HK\$|(?<![a-z])hkd(?![a-z])|港幣|港币|港元/i],
+  ["MOP", /(?<![a-z])mop(?![a-z])|澳門幣|澳门币|澳門元|澳门元|葡幣|pataca/i],
+  ["TWD", /NT\$|(?<![a-z])twd(?![a-z])|台幣|臺幣|新台|新臺/i],
+  ["SGD", /(?<![a-z])S\$|(?<![a-z])sgd(?![a-z])|新加坡元|新加坡幣|新幣|坡幣/i],
+  ["AUD", /(?<![a-z])A\$|(?<![a-z])aud(?![a-z])|澳元|澳幣|澳币/i],
+  ["NZD", /NZ\$|(?<![a-z])nzd(?![a-z])|紐元|紐幣|纽币/i],
+  ["CAD", /(?<![a-z])C\$|(?<![a-z])cad(?![a-z])|加元|加幣|加币/i],
+  ["USD", /US\$|(?<![a-z])usd(?![a-z])|美元|美金/i],
+  ["KRW", /₩|(?<![a-z])krw(?![a-z])|韓圓|韓元|韩元|韓幣|(?<![a-z])won(?![a-z])|원/i],
+  ["THB", /฿|(?<![a-z])thb(?![a-z])|泰銖|泰铢|泰幣|(?<![a-z])baht(?![a-z])/i],
+  ["CHF", /(?<![a-z])chf(?![a-z])|瑞士法郎|瑞郎|(?<![a-z])s?fr\./i],
+  ["EUR", /€|(?<![a-z])eur(?:o|os)?(?![a-z])|歐元|欧元/i],
+  ["GBP", /£|(?<![a-z])gbp(?![a-z])|英鎊|英镑/i],
+  ["INR", /₹|(?<![a-z])inr(?![a-z])|盧比|卢比|(?<![a-z])rs\.?(?=\s*\d)/i],
+  ["JPY", /(?<![a-z])jpy(?![a-z])|日圓|日元|日幣|日币|円|(?<![a-z])yen(?![a-z])/i],
+  ["CNY", /(?<![a-z])(?:cny|rmb)(?![a-z])|人民幣|人民币/i],
+];
+
+/** City → local currency, used when a price has no currency symbol. Generic, not tied to one trip. */
+const CITY_CURRENCY: [string, RegExp][] = [
+  ["JPY", /japan|tokyo|osaka|kyoto|nara|kobe|sapporo|hokkaido|fukuoka|okinawa|naha|nagoya|hiroshima|yokohama|kanazawa|hakone|nikko|日本|東京|大阪|京都|奈良|神戶|札幌|北海道|福岡|沖繩|名古屋|廣島|橫濱|金澤|箱根|日光/i],
+  ["KRW", /korea|seoul|busan|jeju|incheon|韓國|首爾|釜山|濟州|仁川/i],
+  ["TWD", /taiwan|taipei|taichung|tainan|kaohsiung|hualien|台灣|臺灣|台北|臺北|台中|台南|高雄|花蓮/i],
+  ["THB", /thailand|bangkok|chiang ?mai|phuket|pattaya|krabi|泰國|曼谷|清邁|布吉|芭堤雅|喀比/i],
+  ["SGD", /singapore|新加坡/i],
+  ["MOP", /macau|macao|澳門/i],
+  ["HKD", /hong ?kong|香港/i],
+  ["CNY", /china|shanghai|beijing|shenzhen|guangzhou|chengdu|hangzhou|xi'?an|中國|上海|北京|深圳|廣州|成都|杭州|西安/i],
+  ["CHF", /switzerland|zurich|z[üu]rich|geneva|lucerne|luzern|zermatt|interlaken|bern|瑞士|蘇黎世|日內瓦|琉森|策馬特|因特拉肯|伯爾尼/i],
+  ["GBP", /\buk\b|england|scotland|london|edinburgh|manchester|英國|倫敦|愛丁堡|曼徹斯特/i],
+  ["AUD", /australia|sydney|melbourne|brisbane|perth|澳洲|悉尼|墨爾本|布里斯班|珀斯/i],
+  ["NZD", /new zealand|auckland|queenstown|christchurch|紐西蘭|奧克蘭|皇后鎮/i],
+  ["CAD", /canada|toronto|vancouver|montreal|加拿大|多倫多|溫哥華|蒙特利爾/i],
+  ["USD", /\busa\b|new york|los angeles|san francisco|hawaii|honolulu|las vegas|美國|紐約|洛杉磯|三藩市|夏威夷|拉斯維加斯/i],
+  ["INR", /india|delhi|mumbai|印度|德里|孟買/i],
+  ["EUR", /italy|milan|milano|florence|firenze|rome|roma|venice|venezia|naples|spain|madrid|barcelona|seville|sevilla|granada|portugal|lisbon|lisboa|porto|france|paris|nice|lyon|germany|berlin|munich|vienna|austria|amsterdam|netherlands|brussels|belgium|athens|greece|dublin|helsinki|意大利|米蘭|佛羅倫斯|羅馬|威尼斯|拿坡里|西班牙|馬德里|巴塞隆拿|塞維亞|格拉納達|葡萄牙|里斯本|波爾圖|法國|巴黎|尼斯|里昂|德國|柏林|慕尼黑|維也納|奧地利|阿姆斯特丹|荷蘭|布魯塞爾|比利時|雅典|希臘|都柏林|赫爾辛基/i],
+];
+
+export function currencyForPlace(text: string): string {
+  const blob = text.trim();
+  if (!blob) return "";
+  for (const [code, re] of CITY_CURRENCY) if (re.test(blob)) return code;
+  return "";
+}
+
+function explicitCurrency(text: string): string {
+  for (const [code, re] of CURRENCY_MARKS) if (re.test(text)) return code;
+  return "";
+}
+
+const tripCurrencyCache = new WeakMap<TripBook, string>();
+
+/** The trip's local currency: majority of its cities, else majority of explicitly marked prices. "" when unknown. */
+export function tripCurrency(trip: TripBook): string {
+  const hit = tripCurrencyCache.get(trip);
+  if (hit !== undefined) return hit;
+  const vote = (values: string[]) => {
+    const counts = new Map<string, number>();
+    for (const value of values) if (value) counts.set(value, (counts.get(value) || 0) + 1);
+    return [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || "";
+  };
+  let code = vote(trip.days.map((day) => currencyForPlace(day.city)));
+  if (!code) {
+    const prices = trip.days.flatMap((day) => [...day.spots, ...day.meals, ...day.hotels, ...day.rides].map((row) => row.price || ""));
+    code = vote(prices.map(explicitCurrency).filter((value) => value !== "HKD"));
+  }
+  if (!code) code = currencyForPlace(`${trip.title} ${trip.subtitle}`);
+  tripCurrencyCache.set(trip, code);
+  return code;
+}
+
+/**
+ * Parse a free-text price. `fallback` is the trip's local currency (see tripCurrency).
+ * `guess: true` means no unambiguous currency marker was found, so Money should ask the user to check it.
+ */
+export function parsePrice(raw: string, fallback = ""): { amount: number; currency: string; guess?: true } | null {
   const text = raw.trim();
-  if (!text || /免費|免费|free/i.test(text)) return null;
-  const currency = /HK\$|hkd|港幣|港币/i.test(text)
-    ? "HKD"
-    : /€|eur|歐元|欧元/i.test(text)
-      ? "EUR"
-      : /£|gbp|英鎊|英镑/i.test(text)
-        ? "GBP"
-        : /nt\$|twd|台幣|新台/i.test(text)
-          ? "TWD"
-          : /usd|us\$|美元/i.test(text)
-            ? "USD"
-            : /jpy|日圓|日元|¥|￥/i.test(text)
-              ? "JPY"
-              : /cny|rmb|人民幣|人民币/i.test(text)
-                ? "CNY"
-                : "HKD";
-  const num = text.replace(/,/g, "").match(/(\d+(?:\.\d+)?)/);
+  if (!text || /免費|免费|(?<![a-z])free(?![a-z])/i.test(text)) return null;
+  const num = text.replace(/(\d),(?=\d{3})/g, "$1").match(/(\d+(?:\.\d+)?)/);
   if (!num) return null;
   const amount = Number(num[1]);
   if (!Number.isFinite(amount) || amount <= 0) return null;
-  return { amount, currency };
+  const local = (MONEY_CURRENCIES as readonly string[]).includes(fallback) ? fallback : "";
+  const marked = explicitCurrency(text);
+  if (marked) return { amount, currency: marked };
+  if (/[¥￥]/.test(text)) {
+    // ¥ is both yen and yuan: trust the trip's own currency when it is one of the two.
+    if (local === "CNY" || local === "JPY") return { amount, currency: local };
+    return { amount, currency: "JPY", guess: true };
+  }
+  if (/\$/.test(text)) {
+    if (local && DOLLARS.has(local)) return { amount, currency: local };
+    return { amount, currency: "USD", guess: true };
+  }
+  if (/元|圓/.test(text) && (local === "CNY" || local === "TWD" || local === "HKD" || local === "MOP")) return { amount, currency: local };
+  return { amount, currency: local || "HKD", guess: true };
 }
 
 export function dayIdForDate(trip: TripBook, iso: string): string {
@@ -243,7 +325,8 @@ export function spendItem(
   if (!(date instanceof Date)) return null;
   const name = label.trim().slice(0, 80);
   if (!name) return null;
-  const parsed = parsePrice(price);
+  const local = tripCurrency(trip);
+  const parsed = parsePrice(price, local);
   const clock = /^\d{2}:\d{2}$/.test(time) ? time : "";
   const base = {
     ...(category ? { category } : {}),
@@ -252,33 +335,150 @@ export function spendItem(
   };
   if (!parsed) {
     if (!blank) return null;
-    return { date: isoDate(date), label: name, amount: 0, currency: "HKD", ...base };
+    return { date: isoDate(date), label: name, amount: 0, currency: local || "HKD", ...(local ? {} : { currencyGuess: true as const }), ...base };
   }
-  return { date: isoDate(date), label: name, amount: parsed.amount, currency: parsed.currency, ...base };
+  return {
+    date: isoDate(date),
+    label: name,
+    amount: parsed.amount,
+    currency: parsed.currency,
+    ...(parsed.guess ? { currencyGuess: true as const } : {}),
+    ...base,
+  };
 }
 
-export function spendOnDay(trip: TripBook, day: TripDay): SpendItem[] {
-  const index = trip.days.findIndex((item) => item.id === day.id);
-  const date = dayDates(trip)[index];
-  if (!(date instanceof Date)) return [];
-  const iso = isoDate(date);
+/** Route-first ride label, e.g. "關西 → 難波 · 電車"; a bare duration like 「約 50 分鐘」 is never the whole label. */
+export function rideSpendLabel(ride: { from: string; to: string; mode: string; detail: string }): string {
+  const route = [ride.from, ride.to].map((part) => part.trim()).filter(Boolean).join(" → ");
+  const detail = ride.detail.trim();
+  const durationOnly = /^(約|约|大約|~)?\s*\d+(\.\d+)?\s*(分鐘|分钟|分|小時|小时|min|mins|minutes|h|hr|hrs|hours)\s*$/i.test(detail);
+  const parts = [route, ride.mode.trim()].filter(Boolean);
+  if (!route && detail && !durationOnly) parts.unshift(detail);
+  return parts.join(" · ").slice(0, 80) || (durationOnly ? "" : detail.slice(0, 80)) || "交通";
+}
+
+export function rideRef(ride: { from: string; to: string }): string {
+  return `ride-${ride.from}-${ride.to}`;
+}
+
+function isCheckoutHotel(trip: TripBook, dayIndex: number, name: string): boolean {
+  if (dayIndex !== trip.days.length - 1 || dayIndex === 0) return false;
+  return trip.days[dayIndex - 1].hotels.some((hotel) => hotel.name.trim() === name.trim());
+}
+
+/** Every priced row on a day, timeline order when the day has one, rides last. Same keys as the per-item buttons. */
+export function dayCostItems(trip: TripBook, day: TripDay): SpendItem[] {
+  const dayIndex = trip.days.findIndex((item) => item.id === day.id);
+  if (dayIndex < 0) return [];
   const items: SpendItem[] = [];
   const seen = new Set<string>();
-  const push = (label: string, price: string, category: SpendCategory) => {
-    const parsed = parsePrice(price);
-    if (!parsed) return;
-    const name = label.trim().slice(0, 80);
-    if (!name) return;
-    const key = `${name}|${parsed.amount}|${parsed.currency}`;
-    if (seen.has(key)) return;
-    seen.add(key);
-    items.push({ date: iso, label: name, amount: parsed.amount, currency: parsed.currency, category });
+  const add = (item: SpendItem | null) => {
+    if (!item || !(item.amount > 0) || seen.has(item.key || "")) return;
+    seen.add(item.key || "");
+    items.push(item);
   };
-  for (const spot of day.spots) push(spot.name, spot.price, "sight");
-  for (const meal of day.meals) push(meal.name, meal.price, "meal");
-  for (const hotel of day.hotels) push(hotel.name, hotel.price, "hotel");
-  for (const ride of day.rides) push(ride.detail || `${ride.from} → ${ride.to}`, ride.price, "ride");
-  return items.slice(0, 20);
+  type Entry = { kind: SpendCategory; id: string; name: string; price: string; time: string };
+  const entries: Entry[] = [
+    ...day.spots.map((spot) => ({ kind: "sight" as const, id: spot.id, name: spot.name, price: spot.price, time: spendTimeHint("", spot.hours) })),
+    ...day.meals.map((meal) => ({ kind: "meal" as const, id: meal.id, name: meal.name, price: meal.price, time: spendTimeHint(meal.slot, meal.hours) })),
+    ...day.hotels
+      .filter((hotel) => !isCheckoutHotel(trip, dayIndex, hotel.name))
+      .map((hotel) => ({ kind: "hotel" as const, id: hotel.id, name: hotel.name, price: hotel.price, time: "" })),
+  ];
+  if (day.timeline.length) {
+    const order = new Map(day.timeline.map((id, at) => [id, at]));
+    entries.sort((a, b) => (order.get(a.id) ?? 999) - (order.get(b.id) ?? 999));
+  }
+  for (const entry of entries) add(spendItem(trip, day, entry.name, entry.price, false, entry.kind, entry.time, entry.id));
+  for (const ride of day.rides) add(spendItem(trip, day, rideSpendLabel(ride), ride.price, false, "ride", "", rideRef(ride)));
+  return items;
+}
+
+/** One day's batch for MoneyTracker's multi-row sheet (Money accepts up to 20 rows). */
+export function spendOnDay(trip: TripBook, day: TripDay): SpendItem[] {
+  return dayCostItems(trip, day).slice(0, 20);
+}
+
+export type CostTotals = Record<string, Partial<Record<SpendCategory, number>> & { all: number }>;
+
+export type TripCosts = {
+  currency: string;
+  days: { day: TripDay; date: string; items: SpendItem[]; totals: Record<string, number> }[];
+  /** currency → per-category sums. */
+  totals: CostTotals;
+  count: number;
+  guessCount: number;
+};
+
+export function tripCosts(trip: TripBook): TripCosts {
+  const totals: CostTotals = {};
+  let count = 0;
+  let guessCount = 0;
+  const days = trip.days.map((day) => {
+    const items = dayCostItems(trip, day);
+    const dayTotals: Record<string, number> = {};
+    for (const item of items) {
+      const kind = item.category || "other";
+      const bucket = (totals[item.currency] ||= { all: 0 });
+      bucket[kind] = (bucket[kind] || 0) + item.amount;
+      bucket.all += item.amount;
+      dayTotals[item.currency] = (dayTotals[item.currency] || 0) + item.amount;
+      count += 1;
+      if (item.currencyGuess) guessCount += 1;
+    }
+    return { day, date: items[0]?.date || "", items, totals: dayTotals };
+  });
+  return { currency: tripCurrency(trip), days, totals, count, guessCount };
+}
+
+/**
+ * `#estimate=` contract with MoneyTracker: the planner's expected spend, summed per type and currency.
+ * Money converts to HKD with its own FX rates and lets the user set or compare the trip's cash budget.
+ */
+export type TripEstimate = {
+  v: 1;
+  trip: string;
+  tripId: string;
+  bookId: string;
+  start: string;
+  end: string;
+  count: number;
+  guess: number;
+  lines: { category: SpendCategory; currency: string; amount: number }[];
+};
+
+export function tripEstimate(trip: TripBook, costs = tripCosts(trip)): TripEstimate {
+  const dates = dayDates(trip).filter((date): date is Date => date instanceof Date);
+  const lines: TripEstimate["lines"] = [];
+  for (const [currency, bucket] of Object.entries(costs.totals)) {
+    for (const kind of ["hotel", "ride", "meal", "sight", "other"] as SpendCategory[]) {
+      const amount = bucket[kind] || 0;
+      if (amount > 0) lines.push({ category: kind, currency, amount: Math.round(amount * 100) / 100 });
+    }
+  }
+  return {
+    v: 1,
+    trip: trip.title.slice(0, 80),
+    tripId: moneyTripIdForBook(trip.id).slice(0, 80),
+    bookId: trip.id.slice(0, 80),
+    start: dates[0] ? isoDate(dates[0]) : "",
+    end: dates.length ? isoDate(dates[dates.length - 1]) : "",
+    count: costs.count,
+    guess: costs.guessCount,
+    lines: lines.slice(0, 40),
+  };
+}
+
+const SYMBOL: Record<string, string> = { HKD: "HK$", USD: "US$", JPY: "¥", CNY: "¥", TWD: "NT$", THB: "฿", GBP: "£", EUR: "€", AUD: "A$", SGD: "S$", KRW: "₩", CAD: "C$", NZD: "NZ$", INR: "₹", MOP: "MOP$", CHF: "CHF " };
+
+export function formatSpend(amount: number, currency: string): string {
+  const rounded = Math.round(amount * 100) / 100;
+  const text = rounded.toLocaleString("en-US", { maximumFractionDigits: Number.isInteger(rounded) ? 0 : 2 });
+  return `${SYMBOL[currency] || `${currency} `}${text}`;
+}
+
+export function moneyEstimateUrl(estimate: TripEstimate): string {
+  return `${MONEY_URL}#estimate=${encodeToken(JSON.stringify(estimate))}`;
 }
 
 export function encodeProposal(body: { trip: string; tripId: string; bookId?: string; items: SpendItem[] }): string {
