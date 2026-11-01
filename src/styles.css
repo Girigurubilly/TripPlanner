@@ -2161,7 +2161,22 @@ a.stamp {
   font-weight: 650;
   color: #8a7f70;
 }
-.dock button[aria-selected="true"] {
+.dock button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  font-size: 0.74rem;
+  min-width: 0;
+}
+.dock button span {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dock button[aria-current="page"] {
   color: var(--accent);
 }
 .screen-title {
@@ -2404,7 +2419,8 @@ a.stamp {
   gap: 8px;
   margin: 4px 0 14px;
 }
-.segment > div {
+.segment > div,
+.segment > button {
   flex: 1;
   min-height: 44px;
   border-radius: 999px;
@@ -2414,7 +2430,8 @@ a.stamp {
   line-height: 44px;
   font-weight: 700;
 }
-.segment > div.on {
+.segment > div.on,
+.segment > button.on {
   background: var(--accent);
   border-color: var(--accent);
   color: #fff;
@@ -2690,4 +2707,253 @@ a.stamp {
 }
 .cost-day .cost-day-head {
   margin-bottom: 4px;
+}
+
+/* ---- Buttons that used to be clickable <div>s: keep their old look. ---- */
+button.daychip,
+button.navrow,
+button.fold-bar,
+.segment > button {
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+button.daychip {
+  border: 1px solid var(--line);
+}
+button.daychip.on {
+  color: #fff;
+}
+button.navrow {
+  width: 100%;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: transparent;
+  text-align: left;
+}
+.sheet button.navrow:last-child {
+  border-bottom: 0;
+}
+button.fold-bar {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  text-align: left;
+}
+.segment > button {
+  padding: 0 8px;
+}
+.stop-card[role="button"]:focus-visible,
+button.daychip:focus-visible,
+button.navrow:focus-visible,
+.dock button:focus-visible {
+  outline: 2px solid var(--teal);
+  outline-offset: 2px;
+}
+.navrow-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  background: #f3ede2;
+  color: var(--teal);
+}
+.navrow-main .pill-hint {
+  display: block;
+  margin-top: 2px;
+}
+
+/* ---- 下一站 card (today, while the trip is on) ---- */
+.next-stop {
+  margin: 0 0 14px;
+  padding: 12px 14px 14px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--accent);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+.next-stop.done {
+  border-left-color: var(--teal);
+}
+.next-kicker {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin: 0 0 8px;
+  color: var(--accent);
+  font-size: 0.82rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+.next-kicker span {
+  color: var(--muted);
+  font-weight: 650;
+  letter-spacing: 0;
+}
+.next-done {
+  margin: 0;
+  color: var(--teal);
+  font-weight: 700;
+}
+.next-main {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+}
+.next-main .stop-num {
+  position: static;
+  flex: 0 0 auto;
+  margin-top: 0;
+  box-shadow: none;
+}
+.next-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.next-copy strong {
+  font-size: 1.12rem;
+  line-height: 1.35;
+}
+.next-copy small {
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+.next-copy .next-ride {
+  color: var(--teal);
+}
+.next-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+.next-actions .btn {
+  flex: 1 1 0;
+  min-height: 44px;
+  justify-content: center;
+}
+
+/* ---- Library undo toast ---- */
+.undo-toast {
+  position: fixed;
+  left: 16px;
+  right: 16px;
+  bottom: calc(16px + env(safe-area-inset-bottom));
+  margin: 0 auto;
+  width: fit-content;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: 480px;
+  padding: 8px 8px 8px 16px;
+  border-radius: 999px;
+  background: var(--ink);
+  color: #fff;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.18);
+}
+.undo-toast span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.undo-toast .btn {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  color: #ffd9bf;
+  border-color: transparent;
+  background: transparent;
+  font-weight: 800;
+}
+
+/* ---- Restrained motion: only for people who have not asked for less. ---- */
+@media (prefers-reduced-motion: no-preference) {
+  .screen {
+    animation: screen-in var(--motion-fast) var(--ease) both;
+  }
+  .stamp.on,
+  .stamp-lg.on {
+    animation: stamp-pop 280ms var(--ease);
+  }
+  .meter span {
+    transform-origin: left center;
+    transition: width 420ms var(--ease);
+    animation: meter-grow 520ms var(--ease) both;
+  }
+  .daychip {
+    transition:
+      background-color var(--motion-fast) ease,
+      color var(--motion-fast) ease,
+      border-color var(--motion-fast) ease,
+      transform var(--motion-fast) var(--ease);
+  }
+  .daychip.on {
+    transform: scale(1.04);
+  }
+  .daychip:active,
+  .dock button:active {
+    transform: scale(0.96);
+  }
+  .dock button {
+    transition: color var(--motion-fast) ease, transform var(--motion-fast) var(--ease);
+  }
+  .next-stop,
+  .undo-toast {
+    animation: screen-in 220ms var(--ease) both;
+  }
+  .undo-toast {
+    animation-name: toast-in;
+  }
+}
+@keyframes screen-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes stamp-pop {
+  0% {
+    transform: scale(1);
+  }
+  40% {
+    transform: scale(1.16);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+@keyframes meter-grow {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
 }

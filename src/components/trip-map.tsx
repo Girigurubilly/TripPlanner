@@ -180,13 +180,13 @@ export function TripMap({
     <section className="map-view">
       <div className="daystrip dayjump">
         {trip.days.map((item) => {
-          const chip = dayChip(item);
+          const chip = dayChip(item, trip.cityNames);
           const on = item.id === day.id;
           return (
-            <div key={item.id} className={on ? "daychip on" : "daychip"} onClick={() => onDay(item.id)}>
+            <button key={item.id} type="button" className={on ? "daychip on" : "daychip"} aria-current={on ? "date" : undefined} onClick={() => onDay(item.id)}>
               <b>{chip.num}</b>
               {chip.hint ? <small>{chip.hint}</small> : null}
-            </div>
+            </button>
           );
         })}
       </div>
@@ -206,7 +206,7 @@ export function TripMap({
             </span>
           </div>
         ) : (
-          <p className="tiny">{cityLabel(day.city) || "今日"}未有可以標示嘅地點。</p>
+          <p className="tiny">{cityLabel(day.city, trip.cityNames) || "今日"}未有可以標示嘅地點。</p>
         )}
         {pins.length > 1 ? (
           <div className="map-picks">
@@ -238,6 +238,6 @@ export function TripMap({
   );
 }
 
-function dayChip(day: TripDay): { num: string; hint: string } {
-  return dayChipParts(day);
+function dayChip(day: TripDay, names?: Record<string, string>): { num: string; hint: string } {
+  return dayChipParts(day, names);
 }

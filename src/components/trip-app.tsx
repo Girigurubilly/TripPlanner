@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import { TripMap } from "./trip-map";
 import {
   BookOpen,
@@ -11,6 +11,9 @@ import {
   Download,
   Gift,
   Info,
+  MapPin,
+  MoreHorizontal,
+  Wallet,
   TrainFront,
   Trash2,
   Upload,
@@ -20,6 +23,11 @@ import {
 } from "lucide-react";
 import {
   cityLabel,
+  dayDates,
+  nextStop,
+  restoreTrip,
+  snapshotTrip,
+  sortTrips,
   cleanCredit,
   dayChipParts,
   dayKey,
@@ -65,7 +73,9 @@ import {
   type TripDay,
   type TripGuide,
   type Ride,
+  type TripSnapshot,
 } from "@/lib/trip";
+import { t } from "@/lib/i18n";
 import { DrivePanel } from "@/components/drive-panel";
 import { syncTripDriveIfDue } from "@/lib/drive-sync";
 import { AI_TRIP_PROMPT, wishUpdatePrompt } from "@/lib/ai-prompt";
@@ -77,10 +87,25 @@ const TAB_ICON: Record<string, LucideIcon> = {
   overview: BookOpen,
   days: CalendarDays,
   transport: TrainFront,
+  map: MapPin,
+  eat: Coffee,
+  more: MoreHorizontal,
+  costs: Wallet,
   photo: Camera,
   food: Coffee,
   souvenir: Gift,
   practical: Info,
+};
+
+/** Bottom dock: five fixed slots. 總覽 / 指南 / 費用 live under 更多. */
+const DOCK_TABS = ["days", "map", "transport", "eat", "more"] as const;
+type DockTab = (typeof DOCK_TABS)[number];
+const DOCK_LABEL: Record<DockTab, Parameters<typeof t>[0]> = {
+  days: "tab.days",
+  map: "tab.map",
+  transport: "tab.transport",
+  eat: "tab.eat",
+  more: "tab.more",
 };
 
 function coverOf(trip: TripBook): string {
@@ -91,8 +116,17 @@ function coverOf(trip: TripBook): string {
   return "";
 }
 
-function dayChip(day: TripDay): { num: string; hint: string } {
-  return dayChipParts(day);
+function dayChip(day: TripDay, names?: Record<string, string>): { num: string; hint: string } {
+  return dayChipParts(day, names);
+}
+
+function tripSpan(trip: TripBook): string {
+  const dates = dayDates(trip).filter((date): date is Date => date instanceof Date);
+  if (!dates.length) return "";
+  const fmt = (date: Date) => `${date.getMonth() + 1}/${date.getDate()}`;
+  const first = dates[0];
+  const last = dates[dates.length - 1];
+  return first.getTime() === last.getTime() ? `${first.getFullYear()} · ${fmt(first)}` : `${first.getFullYear()} · ${fmt(first)} – ${fmt(last)}`;
 }
 
 function labelTables(root: ParentNode) {
@@ -376,7 +410,12 @@ export function TripApp() {
   const [rev, setRev] = useState(0);
   const [moneyAsk, setMoneyAsk] = useState<MoneyTripRef | null>(null);
   const [pendingImport, setPendingImport] = useState<{ books: TripBook[]; source: string; lines: string[]; raw: string } | null>(null);
+  const [undo, setUndo] = useState<TripSnapshot | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const undoTimer = useRef<number | undefined>(undefined);
+  const ordered = useMemo(() => sortTrips(trips), [trips]);
+
+  useEffect(() => () => window.clearTimeout(undoTimer.current), []);
 
   useEffect(() => {
     window.name = "trip-planner";
@@ -594,10 +633,10 @@ export function TripApp() {
             <section>
               <div className="lib-head">
                 <h1>我的行程</h1>
-                <p className="muted">撳一張卡打開。同一個 id 再上傳會更新內容，筆記保留。</p>
+                <p className="muted">撳一張卡打開。{t("lib.reupload")}筆記保留。</p>
               </div>
               <div className="trip-grid">
-                {trips.map((trip) => (
+                {ordered.map((trip) => (
                   <TripCard
                     key={trip.id}
                     trip={trip}
@@ -610,8 +649,12 @@ export function TripApp() {
                       setError("");
                     }}
                     onDelete={() => {
+                      const snap = snapshotTrip(trips, trip.id);
                       setTrips(deleteTrip(trips, trip.id));
-                      setStatus(`已刪除「${trip.title}」`);
+                      setStatus("");
+                      window.clearTimeout(undoTimer.current);
+                      setUndo(snap);
+                      undoTimer.current = window.setTimeout(() => setUndo(null), 7000);
                     }}
                     onPick={
                       moneyAsk
@@ -642,6 +685,23 @@ export function TripApp() {
             </section>
           )}
           {status ? <p className="status">{status}</p> : null}
+          {undo ? (
+            <div className="undo-toast" role="status">
+              <span>{t("lib.deleted", { title: undo.trip.title })}</span>
+              <button
+                className="btn ghost"
+                type="button"
+                onClick={() => {
+                  window.clearTimeout(undoTimer.current);
+                  setTrips((current) => restoreTrip(current, undo));
+                  setStatus(t("lib.restored", { title: undo.trip.title }));
+                  setUndo(null);
+                }}
+              >
+                {t("lib.undo")}
+              </button>
+            </div>
+          ) : null}
           {moneyAsk ? (
             <p className="status">
               理財 App 想打開「{moneyAsk.name || moneyAsk.dest || "呢趟"}」
@@ -694,7 +754,7 @@ function TripCard({
   const progress = bookingProgress(trip);
   return (
     <article className="trip-tile">
-      <div className="trip-open" onClick={onOpen}>
+      <button className="trip-open" type="button" onClick={onOpen}>
         {cover ? <img className="trip-cover" src={cover} alt="" /> : <span className="trip-cover empty-cover" />}
         <span className="trip-copy">
           <strong>{trip.title}</strong>
@@ -703,17 +763,17 @@ function TripCard({
             <span className="chips">
               {cities.map((city) => (
                 <span className={`chip city-${city}`} key={city}>
-                  {cityLabel(city)}
+                  {cityLabel(city, trip.cityNames)}
                 </span>
               ))}
             </span>
           ) : null}
           <span className="muted">{tripStats(trip)}</span>
-          {onPick ? <span className="muted">編號 {trip.id}</span> : null}
+          {onPick && tripSpan(trip) ? <span className="muted">{tripSpan(trip)}</span> : null}
           {timingLabel(tripTiming(trip)) ? <span className="when">{timingLabel(tripTiming(trip))}</span> : null}
           {progress.total ? <span className="muted">已訂 {progress.done}／{progress.total}</span> : null}
         </span>
-      </div>
+      </button>
       <div className="tile-actions">
         {onPick ? (
           <button className="btn primary" type="button" onClick={onPick}>
@@ -772,6 +832,7 @@ function Book({
   const scrollPlace = useRef("");
   const mainRef = useRef<HTMLElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
+  const costsFrom = useRef("more");
 
   useEffect(() => {
     if (!lightbox) return;
@@ -820,7 +881,7 @@ function Book({
       if (jump.dataset.goto === "transport" && activeDay) scrollDay.current = activeDay.id;
       if (jump.dataset.goto === "food") {
         const food = eatGuides.find((guide) => guide.id === "food" || /美食/.test(guide.label)) || eatGuides[0];
-        if (activeDay) scrollPlace.current = cityLabel(activeDay.city);
+        if (activeDay) scrollPlace.current = cityLabel(activeDay.city, trip.cityNames);
         onTab(food?.id || "food");
         window.scrollTo({ top: 0 });
         return;
@@ -837,9 +898,11 @@ function Book({
     ? "eat"
     : guideIds.has(activeTab) || activeTab === "guides"
       ? "guides"
-      : activeTab === "days" || activeTab === "transport" || activeTab === "map"
+      : activeTab === "days" || activeTab === "transport" || activeTab === "map" || activeTab === "more"
         ? activeTab
         : "overview";
+  // Dock highlight: 總覽 / 指南 / 費用 are reached through 更多.
+  const dockTab: DockTab = rootTab === "overview" || rootTab === "guides" ? "more" : (rootTab as DockTab);
 
   const costs = useMemo(() => tripCosts(trip), [trip]);
 
@@ -882,7 +945,7 @@ function Book({
   const places = useMemo(() => {
     const names: string[] = [];
     for (const day of trip.days) {
-      const label = cityLabel(day.city);
+      const label = cityLabel(day.city, trip.cityNames);
       if (label && !names.includes(label)) names.push(label);
     }
     for (const guide of trip.guides) {
@@ -912,8 +975,11 @@ function Book({
         const shown = slices.length
           ? slices
           : all.flatMap((slice, index) => {
-              const title = chipTitle(slice.title) || chipTitle(guide.label);
-              if (!title || title === "內容") return [];
+              // A one-section guide comes back as a single "內容" slice: list
+              // it under the guide's own name instead of hiding it.
+              const own = chipTitle(slice.title);
+              const title = own && own !== "內容" ? own : chipTitle(guide.label);
+              if (!title) return [];
               return [{ title, index }];
             });
         return { guide, slices: shown };
@@ -942,14 +1008,22 @@ function Book({
   let screenTitle = trip.title;
   if (detailItem) screenTitle = detailItem.name;
   else if (rootTab === "days" && activeDay) screenTitle = activeDay.label || activeDay.title;
-  else if (rootTab === "transport") screenTitle = "交通";
-  else if (rootTab === "map") screenTitle = "地圖";
-  else if (activeTab === "costs") screenTitle = "費用";
-  else if (rootTab === "eat") screenTitle = "美食手信";
-  else if (topic) screenTitle = topic.title;
+  else if (rootTab === "transport") screenTitle = t("tab.transport");
+  else if (rootTab === "map") screenTitle = t("tab.map");
+  else if (rootTab === "more") screenTitle = t("tab.more");
+  else if (activeTab === "costs") screenTitle = t("tab.costs");
+  else if (rootTab === "eat") screenTitle = t("tab.eat");
+  else if (topic) screenTitle = topic.title === "內容" && openGuide ? openGuide.label : topic.title;
   else if (openGuide) screenTitle = openGuide.label;
-  else if (rootTab === "guides") screenTitle = "指南";
-  else screenTitle = "總覽";
+  else if (rootTab === "guides") screenTitle = t("tab.guides");
+  else screenTitle = t("tab.overview");
+  const subScreen = Boolean(searching || detailItem || topic || openGuide || activeTab === "costs" || rootTab === "guides" || (rootTab === "overview" && activeTab !== "costs" && trip.days.length));
+
+  function openCosts() {
+    costsFrom.current = rootTab === "overview" ? "overview" : "more";
+    onTab("costs");
+    window.scrollTo({ top: 0 });
+  }
 
   function openHit(hit: SearchHit) {
     setSearching(false);
@@ -1005,7 +1079,12 @@ function Book({
       return;
     }
     if (activeTab === "costs") {
-      onTab("overview");
+      onTab(costsFrom.current);
+      window.scrollTo({ top: 0 });
+      return;
+    }
+    if (subScreen) {
+      onTab("more");
       window.scrollTo({ top: 0 });
       return;
     }
@@ -1024,7 +1103,7 @@ function Book({
   return (
     <div className="app book app-shell" onClick={onContentClick}>
       <header className="topbar">
-        <button className="icon-btn" type="button" aria-label={searching || detailItem || topic || openGuide || activeTab === "costs" ? "返回" : "返回行程庫"} onClick={goBack}>
+        <button className="icon-btn" type="button" aria-label={subScreen ? "返回" : "返回行程庫"} onClick={goBack}>
           <ChevronLeft size={20} aria-hidden="true" />
         </button>
         {searching ? (
@@ -1051,13 +1130,13 @@ function Book({
             {query.trim() && !hits.length ? <p className="muted search-hint">冇搵到「{query.trim()}」</p> : null}
             <div className="sheet">
               {hits.map((hit) => (
-                <div className="navrow" key={`${hit.dayId}-${hit.kind}-${hit.index}-${hit.title}`} onClick={() => openHit(hit)}>
+                <button className="navrow" type="button" key={`${hit.dayId}-${hit.kind}-${hit.index}-${hit.title}`} onClick={() => openHit(hit)}>
                   <span className="navrow-main">
                     <strong>{hit.title}</strong>
                     <span className="pill-hint">{hit.meta}</span>
                   </span>
                   <span className="navrow-go" aria-hidden="true">›</span>
-                </div>
+                </button>
               ))}
             </div>
           </section>
@@ -1140,7 +1219,7 @@ function Book({
                       onTab("days");
                     }}
                   >
-                    {cityLabel(city)}
+                    {cityLabel(city, trip.cityNames)}
                   </button>
                 ))}
               </div>
@@ -1154,14 +1233,7 @@ function Book({
               </>
             ) : null}
             {costs.count ? (
-              <button
-                className="cost-entry"
-                type="button"
-                onClick={() => {
-                  onTab("costs");
-                  window.scrollTo({ top: 0 });
-                }}
-              >
+              <button className="cost-entry" type="button" onClick={openCosts}>
                 <span>
                   <b>費用</b>
                   <small>{costs.count} 項有價錢 · 每日預計同送去理財</small>
@@ -1220,13 +1292,13 @@ function Book({
               <div className="food-day-block">
                 <div className="daystrip dayjump dayjump-sticky" aria-label="日期">
                   {trip.days.map((item) => {
-                    const chip = dayChip(item);
+                    const chip = dayChip(item, trip.cityNames);
                     const on = item.id === activeDay.id;
                     return (
-                      <div key={item.id} className={on ? "daychip on" : "daychip"} onClick={() => onDay(item.id)}>
+                      <button key={item.id} type="button" className={on ? "daychip on" : "daychip"} aria-current={on ? "date" : undefined} onClick={() => onDay(item.id)}>
                         <b>{chip.num}</b>
                         {chip.hint ? <small>{chip.hint}</small> : null}
-                      </div>
+                      </button>
                     );
                   })}
                 </div>
@@ -1260,16 +1332,18 @@ function Book({
               <>
                 <div className="segment">
                   {eatGuides.map((guide) => (
-                    <div
+                    <button
                       key={guide.id}
+                      type="button"
                       className={openEat && guide.id === openEat.id ? "on" : ""}
+                      aria-pressed={Boolean(openEat && guide.id === openEat.id)}
                       onClick={() => {
                         onTab(guide.id);
                         window.scrollTo({ top: 0 });
                       }}
                     >
                       {guide.label}
-                    </div>
+                    </button>
                   ))}
                 </div>
                 {openEat ? (
@@ -1277,13 +1351,14 @@ function Book({
                     {anchored.anchors.length ? (
                       <div className="daystrip anchorstrip">
                         {anchored.anchors.map((item) => (
-                          <div
+                          <button
                             key={item.id}
+                            type="button"
                             className="daychip"
                             onClick={() => document.getElementById(item.id)?.scrollIntoView({ behavior: "smooth", block: "start" })}
                           >
                             {item.label}
-                          </div>
+                          </button>
                         ))}
                       </div>
                     ) : null}
@@ -1327,14 +1402,15 @@ function Book({
 
         {!searching && !detailItem && rootTab === "guides" && !openGuide ? (
           <section className="screen">
-            <h1 className="screen-title">指南</h1>
+            <h1 className="screen-title">{t("tab.guides")}</h1>
             {guideMenus.map((menu) => (
               <div key={menu.guide.id}>
                 <h2 className="sheet-label">{chipTitle(menu.guide.label)}</h2>
                 <div className="sheet">
                   {menu.slices.map((item) => (
-                      <div
+                      <button
                         className="navrow"
+                        type="button"
                         key={`${menu.guide.id}-${item.index}`}
                         onClick={() => {
                           pendingTopic.current = item.index;
@@ -1347,7 +1423,7 @@ function Book({
                           <strong>{item.title}</strong>
                         </span>
                         <span className="navrow-go" aria-hidden="true">›</span>
-                      </div>
+                      </button>
                     ))}
                 </div>
               </div>
@@ -1360,8 +1436,9 @@ function Book({
             {guideParsed?.lead ? <div className="reading lede-block" dangerouslySetInnerHTML={{ __html: guideParsed.lead }} /> : null}
             <div className="sheet">
               {(guideParsed?.slices || []).map((item, index) => (
-                <div
+                <button
                   className="navrow"
+                  type="button"
                   key={`${item.title}-${index}`}
                   onClick={() => {
                     setTopicAt(index);
@@ -1373,7 +1450,7 @@ function Book({
                     <strong>{item.title}</strong>
                   </span>
                   <span className="navrow-go" aria-hidden="true">›</span>
-                </div>
+                </button>
               ))}
             </div>
           </section>
@@ -1381,6 +1458,23 @@ function Book({
 
         {!searching && !detailItem && topic ? (
           <article className="screen reading" dangerouslySetInnerHTML={{ __html: topicHtml || topic.html }} />
+        ) : null}
+
+        {!searching && !detailItem && rootTab === "more" ? (
+          <MoreScreen
+            trip={trip}
+            costs={costs}
+            hasGuides={guideMenus.length > 0}
+            onOpen={(id) => {
+              if (id === "costs") {
+                openCosts();
+                return;
+              }
+              onTab(id);
+              window.scrollTo({ top: 0 });
+            }}
+            onLibrary={onBack}
+          />
         ) : null}
 
         {trip.footer && !searching && !detailItem && topicAt === null && rootTab !== "map" ? <p className="foot">{trip.footer}</p> : null}
@@ -1391,19 +1485,18 @@ function Book({
           </button>
         ) : null}
       </main>
-      <nav className="dock" aria-label="主要畫面">
-        {[
-          ["overview", "總覽"],
-          ["days", "每日"],
-          ["transport", "交通"],
-          ["map", "地圖"],
-          [eatGuides[0]?.id || "food", "美食"],
-          ["guides", "指南"],
-        ].map(([id, label]) => (
-          <button key={label} type="button" aria-selected={rootTab === (eatIds.has(id) || id === "food" ? "eat" : id)} onClick={() => openDock(id)}>
-            {label}
-          </button>
-        ))}
+      <nav className="dock" aria-label={t("dock.label")}>
+        {DOCK_TABS.map((slot) => {
+          const Icon = TAB_ICON[slot];
+          const on = dockTab === slot;
+          const target = slot === "eat" ? eatGuides[0]?.id || "food" : slot;
+          return (
+            <button key={slot} type="button" aria-current={on ? "page" : undefined} data-on={on ? "true" : undefined} onClick={() => openDock(target)}>
+              {Icon ? <Icon size={20} aria-hidden="true" /> : null}
+              <span>{t(DOCK_LABEL[slot])}</span>
+            </button>
+          );
+        })}
       </nav>
       {lightbox ? (
         <div className="lightbox" onClick={() => setLightbox("")} role="presentation">
@@ -1492,10 +1585,10 @@ function FoldSection({ title, html, tripId, startOpen }: { title: string; html: 
   }, [open, html, tripId, title]);
   return (
     <section className="fold">
-      <div className="fold-bar" onClick={() => setOpen((value) => !value)}>
+      <button className="fold-bar" type="button" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
         <strong>{title}</strong>
         <span>{open ? "收起" : "展開"}</span>
-      </div>
+      </button>
       {open ? <div className="reading" ref={ref} dangerouslySetInnerHTML={{ __html: html }} /> : null}
     </section>
   );
@@ -1943,8 +2036,12 @@ function DayScreen({
   const otherPoints = rationale?.points.filter((point) => point !== todayPoint) || [];
   const route = planItems(day);
   const headline = dayHeadline(day);
-  const [hero, ...moreImages] = day.images;
-  const chipRef = useRef<HTMLDivElement>(null);
+  const live = todayDay(trip)?.id === day.id;
+  // While the trip is on, today's screen leads with 下一站 + the timeline;
+  // the big cover photo drops below as a thumbnail.
+  const hero = live ? undefined : day.images[0];
+  const moreImages = live ? day.images : day.images.slice(1);
+  const chipRef = useRef<HTMLButtonElement>(null);
   const readRef = useRef<HTMLDivElement>(null);
   // Unified-timeline days count check-ins over every timeline entry (sights +
   // meals + hotels); legacy days count sights only, as before.
@@ -1972,21 +2069,24 @@ function DayScreen({
     <section className="screen">
       <div className="daystrip dayjump dayjump-sticky" aria-label="日期">
         {trip.days.map((item) => {
-          const chip = dayChip(item);
+          const chip = dayChip(item, trip.cityNames);
           const on = item.id === day.id;
           return (
-            <div
+            <button
               key={item.id}
+              type="button"
               ref={on ? chipRef : undefined}
               className={on ? "daychip on" : "daychip"}
+              aria-current={on ? "date" : undefined}
               onClick={() => onDay(item.id)}
             >
               <b>{chip.num}</b>
               {chip.hint ? <small>{chip.hint}</small> : null}
-            </div>
+            </button>
           );
         })}
       </div>
+      {live ? <NextStopCard trip={trip} day={day} visits={visits} onSpot={onSpot} onMeal={onMeal} onHotel={onHotel} /> : null}
       {titleDayCountHint(trip.title, trip.subtitle, trip.days.length) ? (
         <p className="soft-hint day-count-hint">{titleDayCountHint(trip.title, trip.subtitle, trip.days.length)}</p>
       ) : null}
@@ -1999,7 +2099,7 @@ function DayScreen({
           <figcaption>
             <p className="eyebrow">
               第 {index + 1} / {trip.days.length} 日
-              {day.city ? ` · ${cityLabel(day.city)}` : ""}
+              {day.city ? ` · ${cityLabel(day.city, trip.cityNames)}` : ""}
             </p>
             <p className="day-when">{headline.when}</p>
             <h1>{headline.objective}</h1>
@@ -2009,13 +2109,13 @@ function DayScreen({
         <>
           <p className="eyebrow">
             第 {index + 1} / {trip.days.length} 日
-            {day.city ? ` · ${cityLabel(day.city)}` : ""}
+            {day.city ? ` · ${cityLabel(day.city, trip.cityNames)}` : ""}
           </p>
           <p className="day-when">{headline.when}</p>
           <h1 className="screen-title day-objective">{headline.objective}</h1>
         </>
       )}
-      {moreImages.length ? (
+      {moreImages.length && !live ? (
         <div className="dayimgs thumbs">
           {moreImages.map((image) => (
             <figure className="refimg" key={image.src}>
@@ -2026,8 +2126,7 @@ function DayScreen({
           ))}
         </div>
       ) : null}
-      <DayFacts day={day} />
-      <DayMoneyBatch trip={trip} day={day} />
+      {live ? null : <DayFacts day={day} />}
       <div ref={readRef}>
         {day.leadHtml ? (
           leadLong(day.leadHtml) ? (
@@ -2104,7 +2203,7 @@ function DayScreen({
                 return (
                   <article className={at ? "stop meal done" : "stop meal"} key={`meal-${mealItem.id}`}>
                     <span className="stop-num">{item.num}</span>
-                    <div className="stop-card" onClick={() => onMeal(mealIndex)} role="link">
+                    <div className="stop-card" onClick={() => onMeal(mealIndex)} {...cardKeys(() => onMeal(mealIndex))}>
                       {mealItem.image ? (
                         <img className="stop-thumb" src={mealItem.image} alt="" loading="lazy" />
                       ) : (
@@ -2145,7 +2244,7 @@ function DayScreen({
                 return (
                   <article className={at ? "stop hotel done" : "stop hotel"} key={`hotel-${hotelItem.id}`}>
                     <span className="stop-num">{item.num}</span>
-                    <div className="stop-card" onClick={() => onHotel(hotelIndex)} role="link">
+                    <div className="stop-card" onClick={() => onHotel(hotelIndex)} {...cardKeys(() => onHotel(hotelIndex))}>
                       {hotelItem.image ? (
                         <img className="stop-thumb" src={hotelItem.image} alt="" loading="lazy" />
                       ) : (
@@ -2184,7 +2283,7 @@ function DayScreen({
               return (
                 <article className={at ? "stop done" : "stop"} key={`${spotItem.name}-${spotIndex}`}>
                   <span className="stop-num">{item.num}</span>
-                  <div className="stop-card" onClick={() => onSpot(spotIndex)} role="link">
+                  <div className="stop-card" onClick={() => onSpot(spotIndex)} {...cardKeys(() => onSpot(spotIndex))}>
                     {spotItem.image ? (
                       <img className="stop-thumb" src={spotItem.image} alt="" loading="lazy" />
                     ) : (
@@ -2221,6 +2320,19 @@ function DayScreen({
           </div>
         </>
       ) : null}
+      {live ? <DayFacts day={day} /> : null}
+      {live && moreImages.length ? (
+        <div className="dayimgs thumbs">
+          {moreImages.map((image) => (
+            <figure className="refimg" key={image.src}>
+              <a href={image.href || image.src} target="_blank" rel="noopener">
+                <img src={image.src} alt={image.caption || headline.objective} loading="lazy" />
+              </a>
+            </figure>
+          ))}
+        </div>
+      ) : null}
+      <DayMoneyBatch trip={trip} day={day} />
       {/*
         Keys must differ between these two siblings. Giving both the same
         key={day.id} made React drop the first from its reconciliation map,
@@ -2248,7 +2360,7 @@ function DayScreen({
           ) : null}
           {otherPoints.length ? (
             <details>
-              <summary>成個{cityLabel(day.city) || "行程"}點排</summary>
+              <summary>成個{cityLabel(day.city, trip.cityNames) || "行程"}點排</summary>
               <ul>
                 {otherPoints.map((point) => (
                   <li key={`${point.label}-${point.text.slice(0, 12)}`}>
@@ -2555,6 +2667,163 @@ function leadLong(html: string): boolean {
   return html.replace(/<[^>]+>/g, "").replace(/\s+/g, "").length > 80;
 }
 
+/** Keyboard support for clickable cards that contain their own buttons (so
+ *  they cannot be a <button> themselves). Only reacts when the card itself
+ *  has focus, never for keys pressed on a nested control. */
+function cardKeys(open: () => void) {
+  return {
+    role: "button" as const,
+    tabIndex: 0,
+    onKeyDown: (event: ReactKeyboardEvent<HTMLElement>) => {
+      if (event.target !== event.currentTarget) return;
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        open();
+      }
+    },
+  };
+}
+
+function entryOf(day: TripDay, entry: DayEntry): TripSpot | undefined {
+  if (entry.kind === "spot") return day.spots[entry.index];
+  if (entry.kind === "meal") return day.meals[entry.index];
+  return day.hotels[entry.index];
+}
+
+function NextStopCard({
+  trip,
+  day,
+  visits,
+  onSpot,
+  onMeal,
+  onHotel,
+}: {
+  trip: TripBook;
+  day: TripDay;
+  visits: Record<string, string>;
+  onSpot: (index: number) => void;
+  onMeal: (index: number) => void;
+  onHotel: (index: number) => void;
+}) {
+  const { next, total } = nextStop(day, visits);
+  if (!total) return null;
+  if (!next) {
+    return (
+      <section className="next-stop done" aria-label={t("next.title")}>
+        <p className="next-kicker">{t("next.title")}</p>
+        <p className="next-done">✓ {t("next.allDone", { total })}</p>
+      </section>
+    );
+  }
+  const item = entryOf(day, next.entry);
+  if (!item) return null;
+  const open = () => (next.entry.kind === "meal" ? onMeal : next.entry.kind === "hotel" ? onHotel : onSpot)(next.entry.index);
+  const go = mapLink(item);
+  const kind = t(next.entry.kind === "meal" ? "kind.meal" : next.entry.kind === "hotel" ? "kind.hotel" : "kind.spot");
+  const ride = next.ride ? [next.ride.mode, next.ride.detail].filter(Boolean).join(" · ") : "";
+  return (
+    <section className="next-stop" aria-label={t("next.title")}>
+      <p className="next-kicker">
+        {t("next.title")}
+        <span>{t("next.progress", { done: next.done, total: next.total })}</span>
+      </p>
+      <button className="next-main" type="button" onClick={open}>
+        <span className="stop-num">{next.num}</span>
+        <span className="next-copy">
+          <strong>{item.name}</strong>
+          <small>{[kind, item.hours].filter(Boolean).join(" · ")}</small>
+          {ride ? <small className="next-ride">{t("next.via")}：{ride}</small> : null}
+        </span>
+      </button>
+      <div className="next-actions">
+        {go ? (
+          <a className="btn primary" href={go} target="_blank" rel="noopener">
+            <Navigation size={16} aria-hidden="true" />
+            {t("next.go")}
+          </a>
+        ) : null}
+        <button className="btn" type="button" onClick={() => toggleVisit(trip.id, next.key, "")}>
+          {t("next.checkIn")}
+        </button>
+        <button className="btn ghost" type="button" onClick={open}>
+          {t("next.open")}
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function MoreScreen({
+  trip,
+  costs,
+  hasGuides,
+  onOpen,
+  onLibrary,
+}: {
+  trip: TripBook;
+  costs: TripCosts;
+  hasGuides: boolean;
+  onOpen: (id: string) => void;
+  onLibrary: () => void;
+}) {
+  const rows: { id: string; icon: LucideIcon; label: string; hint: string }[] = [
+    { id: "overview", icon: TAB_ICON.overview, label: t("tab.overview"), hint: t("more.overviewHint") },
+  ];
+  if (hasGuides) rows.push({ id: "guides", icon: TAB_ICON.practical, label: t("tab.guides"), hint: t("more.guidesHint") });
+  rows.push({
+    id: "costs",
+    icon: TAB_ICON.costs,
+    label: t("tab.costs"),
+    hint: costs.count ? `${t("more.costsHint", { count: costs.count })} ${totalsLine(costs.totals)}` : t("more.costsEmpty"),
+  });
+  return (
+    <section className="screen more-screen">
+      <h1 className="screen-title">{t("tab.more")}</h1>
+      <h2 className="sheet-label">{t("more.trip")}</h2>
+      <div className="sheet">
+        {rows.map((row) => {
+          const Icon = row.icon;
+          return (
+            <button className="navrow" type="button" key={row.id} onClick={() => onOpen(row.id)}>
+              <span className="navrow-icon" aria-hidden="true">
+                <Icon size={18} />
+              </span>
+              <span className="navrow-main">
+                <strong>{row.label}</strong>
+                <span className="pill-hint">{row.hint}</span>
+              </span>
+              <span className="navrow-go" aria-hidden="true">›</span>
+            </button>
+          );
+        })}
+      </div>
+      <h2 className="sheet-label">{t("more.keep")}</h2>
+      <div className="sheet">
+        <button className="navrow" type="button" onClick={() => void downloadTrip(trip)}>
+          <span className="navrow-icon" aria-hidden="true">
+            <Download size={18} />
+          </span>
+          <span className="navrow-main">
+            <strong>{t("more.save")}</strong>
+            <span className="pill-hint">{t("more.saveHint")}</span>
+          </span>
+          <span className="navrow-go" aria-hidden="true">›</span>
+        </button>
+        <button className="navrow" type="button" onClick={onLibrary}>
+          <span className="navrow-icon" aria-hidden="true">
+            <ChevronLeft size={18} />
+          </span>
+          <span className="navrow-main">
+            <strong>{t("more.library")}</strong>
+            <span className="pill-hint">{t("more.libraryHint")}</span>
+          </span>
+          <span className="navrow-go" aria-hidden="true">›</span>
+        </button>
+      </div>
+    </section>
+  );
+}
+
 function DayFacts({ day }: { day: TripDay }) {
   const text = day.walkHtml.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
   const km = text.match(/([\d.]+)\s*km/i)?.[1] || "";
@@ -2725,7 +2994,7 @@ function CheckIn({ at, onToggle }: { at: string; onToggle: () => void }) {
 function Transport({ trip, dayId, onDay }: { trip: TripBook; dayId: string; onDay: (id: string) => void }) {
   const days = trip.days.filter((day) => day.rides.length);
   const day = trip.days.find((item) => item.id === dayId) || days[0];
-  const chipRef = useRef<HTMLDivElement>(null);
+  const chipRef = useRef<HTMLButtonElement>(null);
   const covered = new Set(days.map((item) => item.label.replace(/\s+/g, "").slice(0, 6)));
   const leftoverAll = trip.transport.blocks.filter((block) => !covered.has(block.heading.replace(/\s+/g, "").slice(0, 6)) && !days.some((item) => block.heading.replace(/\s+/g, "").includes(item.label.replace(/\s+/g, "").slice(0, 6))));
   // Show unmatched legacy blocks once on the first transport day only — not under every day chip.
@@ -2741,18 +3010,20 @@ function Transport({ trip, dayId, onDay }: { trip: TripBook; dayId: string; onDa
       {days.length ? (
         <div className="daystrip dayjump dayjump-sticky">
           {days.map((item) => {
-            const chip = dayChip(item);
+            const chip = dayChip(item, trip.cityNames);
             const on = item.id === day?.id;
             return (
-              <div
+              <button
                 key={item.id}
+                type="button"
                 ref={on ? chipRef : undefined}
                 className={on ? "daychip on" : "daychip"}
+                aria-current={on ? "date" : undefined}
                 onClick={() => onDay(item.id)}
               >
                 <b>{chip.num}</b>
                 {chip.hint ? <small>{chip.hint}</small> : null}
-              </div>
+              </button>
             );
           })}
         </div>
@@ -2800,7 +3071,7 @@ function DayNav({
   const index = trip.days.findIndex((item) => item.id === day.id);
   const prev = trip.days[index - 1];
   const next = trip.days[index + 1];
-  const chip = dayChip(day);
+  const chip = dayChip(day, trip.cityNames);
   return (
     <nav className="daynav" aria-label="前後日">
       <button className="btn" type="button" disabled={!prev} onClick={() => prev && onDay(prev.id)}>
