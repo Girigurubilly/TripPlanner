@@ -1,3 +1,5 @@
+import type { TripBook } from "./trip.ts";
+
 export const AI_TRIP_PROMPT = [
   "你是資深旅行專家，亦是行程規劃專家。請用這個角色幫我準備一份可以上傳到「行程」App 的行程檔。",
   "",
@@ -69,6 +71,7 @@ export const AI_TRIP_PROMPT = [
   "  - address: 街道或區域，純文字。不要只寫在 html。沒有確實地址就留空字串。",
   "  - price: 門票或人均，純文字，要有金額或「免費」。沒有就留空字串。",
   "  - html: 只寫簡介、注意、影相位。不要再重複開放時間、地址、費用這三項。用 <p> 同 <ul><li>。禁止 <details>、<summary>、再重複名稱或 badge。",
+  "  - dwellMin: 可選，建議停留分鐘數（整數，例如 90）。App 會加總成「今日預計停留」。",
   "",
   "guides 的 html：每個城市一個 <h2>，標題只寫城市中文名，例如 <h2>大阪</h2>，至少兩個城市先有跳轉。城市下面用 <h3> 做小題，不要用 <details>，不要把內容摺起。標題不要加 emoji。",
   "餐廳不要只寫在 html。food 指南加 places 陣列，每日用 meals 指過去，畫面先可以喺當日展開同一間店的地址、菜式同連結。",
@@ -154,6 +157,67 @@ export function wishUpdatePrompt(
     "想加的地方：",
     ...lines,
     "",
+    "現有行程 JSON：",
+    JSON.stringify(book),
+  ].join("\n");
+}
+
+const PLAN_KIND: Record<string, string> = { spot: "景點", meal: "餐廳", hotel: "住宿" };
+
+export type PlanPackEntry = {
+  id: string;
+  kind: string;
+  name: string;
+  address: string;
+  note: string;
+  dwellMin: number;
+  mapsUrl: string;
+};
+
+export type PlanPackDay = { id: string; label: string; title: string; entries: PlanPackEntry[] };
+
+function planLine(entry: PlanPackEntry, position: number): string {
+  const bits = [
+    `${position}. ${PLAN_KIND[entry.kind] || entry.kind}｜${entry.name}`,
+    entry.dwellMin ? `停留約 ${entry.dwellMin} 分鐘` : "停留時間未定（請你建議）",
+  ];
+  if (entry.address) bits.push(`地址：${entry.address}`);
+  if (entry.note) bits.push(`備註：${entry.note.slice(0, 200)}`);
+  if (entry.mapsUrl) bits.push(`地圖：${entry.mapsUrl}`);
+  bits.push(`id：${entry.id}`);
+  return bits.join("｜");
+}
+
+/** Prompt that hands the user's in-app plan (order + dwell + notes) to an AI
+ *  and asks for the full updated TripBook JSON back. One day or the whole trip. */
+export function planningPackPrompt(
+  trip: Pick<TripBook, "id" | "title">,
+  days: PlanPackDay[],
+  book: unknown,
+  wishes: { dayId: string; kind: string; name: string; note: string }[] = [],
+): string {
+  const scope = days.length === 1 ? `「${days[0].label} ${days[0].title}」呢一日`.replace(/\s+」/, "」") : "成個行程";
+  const plan = days.flatMap((day) => {
+    const total = day.entries.reduce((sum, entry) => sum + (entry.dwellMin || 0), 0);
+    const head = `【${`${day.label} ${day.title}`.trim()}】${total ? `（已估停留共 ${total} 分鐘）` : ""}`;
+    return [head, ...(day.entries.length ? day.entries.map((entry, index) => planLine(entry, index + 1)) : ["（未有地方，請按當日城市建議）"]), ""];
+  });
+  const wishLines = wishes.map((wish) => `- ${wish.dayId}｜${WISH_KIND[wish.kind] || wish.kind}｜${wish.name}${wish.note ? `｜${wish.note}` : ""}`);
+  return [
+    `你是資深旅行專家。我已經喺「行程」App 自己排好${scope}嘅地方、次序同停留時間。請根據我嘅規劃，執好成份行程，出一份更新後嘅完整 JSON，用來覆蓋同一個行程。`,
+    "",
+    "硬性規則：",
+    "1. 全程繁體中文。店名、地名可在後面括號附上原文。",
+    "2. 只輸出一個 JSON 程式碼區塊，前後不要加解說。schemaVersion 必須是數字 1。id 必須維持「" + trip.id + "」，title 維持「" + trip.title + "」。",
+    "3. 以我嘅次序為準：每日 timeline 要跟下面列出嘅順序，保留每項嘅 id。除非有休館、營業時間衝突或明顯折返，否則唔好調位；真係要調，喺該日 noteHtml 用一句講點解。",
+    "4. 停留時間：有寫分鐘就照用，寫入 dwellMin；「未定」嘅請按景點性質建議一個合理分鐘數，寫入 dwellMin。用停留時間加交通時間，喺 leadHtml 寫出大約幾點到幾點。",
+    "5. 補齊每項：景點加 badge、tone、hours、address、price、html；餐廳 place 必須同 name 一樣，並加入 id 為 food 的 guide.places。不確定就寫「出發前再核對」，不要編造票價、營業時間或網址。",
+    "6. 按順序重寫當日 rides（每段 from、to、mode、detail、price、note、entry），entry 填目的地嘅 id；walkHtml 要同 rides 一致。",
+    "7. 保留我冇提到嘅日子、酒店、交通、指南同其他內容。image 留空字串，不要新增 images。html 只用 <p> 或 <ul><li>，禁止 script、iframe、style、on* 屬性。",
+    "",
+    "我嘅規劃（已排次序）：",
+    ...plan,
+    ...(wishLines.length ? ["另外想加、但未排入嘅地方（請放入合適位置）：", ...wishLines, ""] : []),
     "現有行程 JSON：",
     JSON.stringify(book),
   ].join("\n");

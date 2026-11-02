@@ -23,6 +23,10 @@ export type TripSpot = {
   /** Short label for refLink (blog/post name). Empty = fallback "參考遊記". */
   refLabel: string;
   html: string;
+  /** Planned minutes to spend here (1–720). Omitted = not estimated yet. */
+  dwellMin?: number;
+  /** Google Maps link the user pasted when adding this place in-app. */
+  mapsUrl?: string;
 };
 
 /** A dining entry: café / bar / restaurant / meal. Same display fields as a
@@ -43,6 +47,10 @@ export type TripMeal = {
   refLink: string;
   refLabel: string;
   html: string;
+  /** Planned minutes to spend here (1–720). Omitted = not estimated yet. */
+  dwellMin?: number;
+  /** Google Maps link the user pasted when adding this place in-app. */
+  mapsUrl?: string;
 };
 
 /** A stay entry: one hotel per day (night's hotel, or checkout on the last
@@ -391,6 +399,7 @@ export function timingLabel(timing: TripTiming | null): string {
 }
 
 export function mapLink(spot: TripSpot): string {
+  if (spot.mapsUrl) return spot.mapsUrl;
   if (typeof DOMParser !== "undefined" && spot.html) {
     const doc = new DOMParser().parseFromString(spot.html, "text/html");
     const link = [...doc.querySelectorAll("a")].find((anchor) =>
@@ -600,7 +609,7 @@ function parseEntryFields(item: Record<string, unknown>): Omit<TripSpot, "id"> {
     address: asString(item.address).trim(),
     price: asString(item.price).trim(),
   });
-  return {
+  const out: Omit<TripSpot, "id"> = {
     name,
     badge,
     tone: normalizeTone(asString(item.tone)),
@@ -612,6 +621,24 @@ function parseEntryFields(item: Record<string, unknown>): Omit<TripSpot, "id"> {
     refLabel: asString(item.refLabel).trim(),
     html: facts.html,
   };
+  const dwell = clampDwell(item.dwellMin);
+  if (dwell) out.dwellMin = dwell;
+  const maps = safeMapsUrl(item.mapsUrl);
+  if (maps) out.mapsUrl = maps;
+  return out;
+}
+
+/** Dwell minutes clamped to 0–720 (whole minutes). 0 means "not set". */
+export function clampDwell(value: unknown): number {
+  const num = typeof value === "number" ? value : typeof value === "string" && value.trim() ? Number(value) : NaN;
+  if (!Number.isFinite(num) || num <= 0) return 0;
+  return Math.min(720, Math.round(num));
+}
+
+function safeMapsUrl(value: unknown): string {
+  const url = asString(value).trim();
+  if (!/^https:\/\//i.test(url) || url.length > 600) return "";
+  return /(?:google\.[^/]+\/maps|maps\.google\.|maps\.app\.goo\.gl|goo\.gl\/maps)/i.test(url) ? url : "";
 }
 
 function parseMeals(value: unknown, dayId: string): TripMeal[] {
@@ -640,6 +667,8 @@ function parseMeals(value: unknown, dayId: string): TripMeal[] {
         refLink: entry.refLink,
         refLabel: entry.refLabel,
         html: entry.html,
+        ...(entry.dwellMin ? { dwellMin: entry.dwellMin } : {}),
+        ...(entry.mapsUrl ? { mapsUrl: entry.mapsUrl } : {}),
       },
     ];
   });
@@ -2092,4 +2121,281 @@ export function nextStop(day: TripDay, visits: Record<string, string>): { next: 
     next.total = total;
   }
   return { next, done, total };
+}
+
+/* ------------------------------------------------------------------ */
+/* In-app day planning: add places, reorder, dwell time, remove.       */
+/* All helpers are pure: they return a new TripBook and never touch    */
+/* storage. The caller persists with saveTrips.                        */
+/* ------------------------------------------------------------------ */
+
+export type PlaceKind = "sight" | "meal";
+
+export type NewDayPlace = {
+  kind: PlaceKind;
+  name: string;
+  address?: string;
+  note?: string;
+  dwellMin?: number | null;
+  mapsUrl?: string;
+  /** Meals only: 早餐 / 午餐 / 下午茶 / 晚餐. */
+  slot?: string;
+  /** Short tag, e.g. 手信. */
+  badge?: string;
+};
+
+export type PlanEntry = {
+  id: string;
+  kind: "spot" | "meal" | "hotel";
+  index: number;
+  name: string;
+  address: string;
+  note: string;
+  dwellMin: number;
+  mapsUrl: string;
+};
+
+function escapeText(value: string): string {
+  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+function plainText(html: string): string {
+  return html.replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/\s+/g, " ").trim();
+}
+
+/** Timeline order for a day. Legacy days (no timeline) get one built from
+ *  the order the day screen already shows: route-ordered sights, then
+ *  meals, then hotels. */
+export function dayOrder(day: TripDay): string[] {
+  if (day.timeline.length) return [...day.timeline];
+  const ids: string[] = [];
+  for (const item of planItems(day)) {
+    if (item.kind === "spot") {
+      const spot = day.spots[item.index];
+      if (spot && !ids.includes(spot.id)) ids.push(spot.id);
+    }
+  }
+  for (const entry of [...day.spots, ...day.meals, ...day.hotels]) {
+    if (!ids.includes(entry.id)) ids.push(entry.id);
+  }
+  return ids;
+}
+
+/** Give a legacy day a real timeline, pairing name-only rides to entry ids
+ *  so the route still interleaves rides correctly. */
+function withTimeline(day: TripDay): TripDay {
+  if (day.timeline.length) return day;
+  const timeline = dayOrder(day);
+  if (!timeline.length) return day;
+  const byName = new Map<string, string>();
+  for (const entry of [...day.spots, ...day.meals, ...day.hotels]) if (!byName.has(entry.name)) byName.set(entry.name, entry.id);
+  return {
+    ...day,
+    timeline,
+    rides: day.rides.map((ride) => (ride.entry || !ride.spot || !byName.has(ride.spot) ? ride : { ...ride, entry: byName.get(ride.spot) || "" })),
+  };
+}
+
+function mapDay(trip: TripBook, dayId: string, fn: (day: TripDay) => TripDay): TripBook {
+  let hit = false;
+  const days = trip.days.map((day) => {
+    if (day.id !== dayId) return day;
+    hit = true;
+    return fn(day);
+  });
+  return hit ? { ...trip, days } : trip;
+}
+
+function newEntryId(day: TripDay, kind: PlaceKind): string {
+  const taken = new Set([...day.spots, ...day.meals, ...day.hotels].map((entry) => entry.id));
+  const base = `${day.id}-${kind === "meal" ? "meal" : "sight"}-p${Date.now().toString(36)}`;
+  let id = base;
+  let n = 1;
+  while (taken.has(id)) id = `${base}-${n++}`;
+  return id;
+}
+
+/** Append a sight or meal to a day and its timeline. Returns the new trip and
+ *  the new entry id ("" when nothing was added). */
+export function addDayPlace(trip: TripBook, dayId: string, place: NewDayPlace): { trip: TripBook; id: string } {
+  const name = place.name.trim().slice(0, 80);
+  if (!name) return { trip, id: "" };
+  let id = "";
+  const next = mapDay(trip, dayId, (raw) => {
+    const day = withTimeline(raw);
+    id = newEntryId(day, place.kind);
+    const note = (place.note || "").trim().slice(0, 300);
+    const address = (place.address || "").trim().slice(0, 200);
+    const dwell = clampDwell(place.dwellMin);
+    const maps = safeMapsUrl(place.mapsUrl);
+    const common = {
+      name,
+      badge: (place.badge || "").trim().slice(0, 8),
+      tone: "ok",
+      hours: "",
+      address,
+      price: "",
+      image: "",
+      refLink: "",
+      refLabel: "",
+      ...(dwell ? { dwellMin: dwell } : {}),
+      ...(maps ? { mapsUrl: maps } : {}),
+    };
+    if (place.kind === "meal") {
+      const meal: TripMeal = { id, slot: (place.slot || "").trim(), place: name, note, ...common, html: "" };
+      return { ...day, meals: [...day.meals, meal], timeline: [...day.timeline, id] };
+    }
+    const spot: TripSpot = { id, ...common, html: note ? `<p>${escapeText(note)}</p>` : "" };
+    return { ...day, spots: [...day.spots, spot], timeline: [...day.timeline, id] };
+  });
+  return { trip: next, id };
+}
+
+/** Rewrite a day's order. Unknown/duplicate ids are dropped; entries the
+ *  caller left out keep their relative order at the end. */
+export function reorderDayTimeline(trip: TripBook, dayId: string, orderedIds: string[]): TripBook {
+  return mapDay(trip, dayId, (raw) => {
+    const day = withTimeline(raw);
+    const known = new Set(day.timeline);
+    const out: string[] = [];
+    for (const id of orderedIds) if (known.has(id) && !out.includes(id)) out.push(id);
+    for (const id of day.timeline) if (!out.includes(id)) out.push(id);
+    return { ...day, timeline: out };
+  });
+}
+
+/** Move one entry up (-1) or down (+1) in the day's order. */
+export function moveDayEntry(trip: TripBook, dayId: string, entryId: string, delta: number): TripBook {
+  const day = trip.days.find((item) => item.id === dayId);
+  if (!day) return trip;
+  const order = dayOrder(day);
+  const from = order.indexOf(entryId);
+  const to = from + delta;
+  if (from < 0 || to < 0 || to >= order.length) return trip;
+  order.splice(from, 1);
+  order.splice(to, 0, entryId);
+  return reorderDayTimeline(trip, dayId, order);
+}
+
+/** Set (or clear with null / 0) the planned minutes for a sight, meal or hotel. */
+export function setEntryDwell(trip: TripBook, dayId: string, entryId: string, dwellMin: number | null): TripBook {
+  const dwell = clampDwell(dwellMin);
+  const apply = <T extends TripSpot | TripMeal>(entry: T): T => {
+    if (entry.id !== entryId) return entry;
+    const copy = { ...entry };
+    if (dwell) copy.dwellMin = dwell;
+    else delete copy.dwellMin;
+    return copy;
+  };
+  return mapDay(trip, dayId, (day) => ({
+    ...day,
+    spots: day.spots.map(apply),
+    meals: day.meals.map(apply),
+    hotels: day.hotels.map(apply),
+  }));
+}
+
+/** Where an entry lives on a day (array + index), or null. */
+export function findDayEntry(day: TripDay, entryId: string): DayEntry | null {
+  const spot = day.spots.findIndex((item) => item.id === entryId);
+  if (spot >= 0) return { kind: "spot", index: spot };
+  const meal = day.meals.findIndex((item) => item.id === entryId);
+  if (meal >= 0) return { kind: "meal", index: meal };
+  const hotel = day.hotels.findIndex((item) => item.id === entryId);
+  if (hotel >= 0) return { kind: "hotel", index: hotel };
+  return null;
+}
+
+/** Remove a sight / meal / hotel from a day, its timeline, and the ride that
+ *  led to it. */
+export function removeDayEntry(trip: TripBook, dayId: string, entryId: string): TripBook {
+  return mapDay(trip, dayId, (raw) => {
+    if (!findDayEntry(raw, entryId)) return raw;
+    const day = withTimeline(raw);
+    return {
+      ...day,
+      spots: day.spots.filter((item) => item.id !== entryId),
+      meals: day.meals.filter((item) => item.id !== entryId),
+      hotels: day.hotels.filter((item) => item.id !== entryId),
+      timeline: day.timeline.filter((id) => id !== entryId),
+      rides: day.rides.filter((ride) => ride.entry !== entryId),
+    };
+  });
+}
+
+/** Check-ins are keyed by array index; after removing entry `index` of
+ *  `kind`, shift later keys of that kind down so they stay on the right stop. */
+export function shiftVisitsOnRemove(visits: Record<string, string>, dayId: string, removed: DayEntry): Record<string, string> {
+  const keyOf = (index: number) =>
+    removed.kind === "spot" ? visitKey(dayId, index) : removed.kind === "meal" ? mealVisitKey(dayId, index) : hotelVisitKey(dayId, index);
+  const out: Record<string, string> = {};
+  const shifted = new Map<string, string>();
+  for (const [key, value] of Object.entries(visits)) {
+    let handled = false;
+    for (let index = removed.index; index < 500; index++) {
+      if (key !== keyOf(index)) continue;
+      handled = true;
+      if (index > removed.index) shifted.set(keyOf(index - 1), value);
+      break;
+    }
+    if (!handled) out[key] = value;
+  }
+  for (const [key, value] of shifted) out[key] = value;
+  return out;
+}
+
+/** Replace one trip's check-ins wholesale (used after a removal shift). */
+export function writeTripVisits(tripId: string, visits: Record<string, string>): void {
+  const all = readVisitMap();
+  all[tripId] = visits;
+  localStorage.setItem(VISITS_KEY, JSON.stringify(all));
+  touchLocalEdit();
+}
+
+/** The day's places in plan order, with what the planner needs per row. */
+export function planEntries(day: TripDay): PlanEntry[] {
+  return dayOrder(day).flatMap((id): PlanEntry[] => {
+    const at = findDayEntry(day, id);
+    if (!at) return [];
+    if (at.kind === "meal") {
+      const meal = day.meals[at.index];
+      return [{ id, kind: "meal", index: at.index, name: meal.name || meal.place, address: meal.address, note: meal.note || plainText(meal.html), dwellMin: meal.dwellMin || 0, mapsUrl: meal.mapsUrl || "" }];
+    }
+    const entry = at.kind === "spot" ? day.spots[at.index] : day.hotels[at.index];
+    return [{ id, kind: at.kind, index: at.index, name: entry.name, address: entry.address, note: plainText(entry.html).slice(0, 300), dwellMin: entry.dwellMin || 0, mapsUrl: entry.mapsUrl || "" }];
+  });
+}
+
+/** Sum of the dwell minutes that are set on the day's sights and meals
+ *  (and hotels, when one has a value). */
+export function dayDwellTotal(day: TripDay): number {
+  return [...day.spots, ...day.meals, ...day.hotels].reduce((sum, entry) => sum + (entry.dwellMin || 0), 0);
+}
+
+/** Total + how many sights/meals still have no estimate (hotels excluded). */
+export function dayDwellStats(day: TripDay): { total: number; set: number; unset: number } {
+  const places = [...day.spots, ...day.meals];
+  const set = places.filter((entry) => entry.dwellMin).length;
+  return { total: dayDwellTotal(day), set, unset: places.length - set };
+}
+
+/** "2 小時 30 分" / "45 分" / "3 小時". */
+export function formatDwell(minutes: number): string {
+  const total = Math.max(0, Math.round(minutes));
+  const hours = Math.floor(total / 60);
+  const mins = total % 60;
+  if (!hours) return `${mins} 分`;
+  return mins ? `${hours} 小時 ${mins} 分` : `${hours} 小時`;
+}
+
+/** Turn a wish into a real day entry (souvenir shops become sights tagged 手信).
+ *  The caller removes the wish afterwards. */
+export function promoteWishToDay(trip: TripBook, wish: WishPlace, dwellMin?: number | null): { trip: TripBook; id: string } {
+  return addDayPlace(trip, wish.dayId, {
+    kind: wish.kind === "meal" ? "meal" : "sight",
+    name: wish.name,
+    note: wish.note,
+    dwellMin: dwellMin ?? null,
+    badge: wish.kind === "souvenir" ? "手信" : "",
+  });
 }
