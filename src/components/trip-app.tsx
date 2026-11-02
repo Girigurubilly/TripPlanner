@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { TripMap } from "./trip-map";
 import {
   BookOpen,
@@ -70,15 +70,23 @@ import {
   removeWish,
   addDayPlace,
   dayDwellStats,
+  daySchedule,
+  dayTravelTotal,
   findDayEntry,
+  formatClock,
   formatDwell,
+  legDirectionsUrl,
+  LEG_TRAVEL_MODES,
   moveDayEntry,
   planEntries,
   promoteWishToDay,
   removeDayEntry,
   reorderDayTimeline,
+  rideForEntry,
   saveTrips,
+  setDayStartTime,
   setEntryDwell,
+  setLegTravel,
   shiftVisitsOnRemove,
   writeTripVisits,
   type PlanEntry,
@@ -3133,11 +3141,12 @@ function DayNav({
 }
 
 const DWELL_CHIPS = [30, 60, 90, 120] as const;
+const TRAVEL_CHIPS = [5, 10, 15, 30, 45, 60] as const;
 const PLAN_KIND_LABEL: Record<string, string> = { spot: "景點", meal: "餐廳", hotel: "住宿" };
 
 /** 今日規劃: add places (name or pasted Google Maps link) straight into the
- *  day, reorder by drag or ↑↓, estimate time at each stop, then pack the plan
- *  for AI. Wishes stay as a softer "maybe" list that can be promoted. */
+ *  day, reorder by drag or ↑↓, estimate dwell + travel, optional start clock,
+ *  then pack the plan for AI. Wishes stay as a softer "maybe" list. */
 function DayPlanner({ trip, day, onTrip }: { trip: TripBook; day: TripDay; onTrip: (next: TripBook) => void }) {
   const [rows, setRows] = useState(loadWishes(trip.id));
   const [kind, setKind] = useState<WishKind>("sight");
@@ -3160,6 +3169,9 @@ function DayPlanner({ trip, day, onTrip }: { trip: TripBook; day: TripDay; onTri
   const byId = new Map(entries.map((entry) => [entry.id, entry]));
   const shown = (dragOrder || entries.map((entry) => entry.id)).map((id) => byId.get(id)).filter((entry): entry is PlanEntry => Boolean(entry));
   const stats = dayDwellStats(day);
+  const travelTotal = dayTravelTotal(day);
+  const schedule = daySchedule(day);
+  const scheduleById = new Map(schedule.stops.map((stop) => [stop.entryId, stop]));
 
   useEffect(() => {
     const load = () => setRows(loadWishes(trip.id));
@@ -3292,7 +3304,28 @@ function DayPlanner({ trip, day, onTrip }: { trip: TripBook; day: TripDay; onTri
   }
 
   function packDays(list: TripDay[]): PlanPackDay[] {
-    return list.map((item) => ({ id: item.id, label: item.label, title: item.title, entries: planEntries(item) }));
+    return list.map((item) => {
+      const daySched = daySchedule(item);
+      const stopById = new Map(daySched.stops.map((stop) => [stop.entryId, stop]));
+      return {
+        id: item.id,
+        label: item.label,
+        title: item.title,
+        ...(item.startTime ? { startTime: item.startTime } : {}),
+        entries: planEntries(item).map((entry) => {
+          const stop = stopById.get(entry.id);
+          const ride = rideForEntry(item, entry.id);
+          return {
+            ...entry,
+            travelBeforeMin: stop?.travelBeforeMin || 0,
+            travelMode: ride?.mode || "",
+            travelNote: ride?.note || "",
+            arrive: stop?.arriveMin != null ? formatClock(stop.arriveMin) : "",
+            leave: stop?.leaveMin != null ? formatClock(stop.leaveMin) : "",
+          };
+        }),
+      };
+    });
   }
 
   async function copyText(text: string, label: string) {
@@ -3321,13 +3354,14 @@ function DayPlanner({ trip, day, onTrip }: { trip: TripBook; day: TripDay; onTri
   }
 
   const canAdd = Boolean(name.trim()) && !/^https?:\/\//i.test(name.trim());
+  const fullTotal = stats.total + travelTotal;
 
   return (
     <div className="extras planner">
       <h2 className="section-label">
         今日規劃 <small>{entries.length ? `${entries.length} 個地方` : "未有地方"}</small>
       </h2>
-      <p className="tiny">打店名或者貼 Google 地圖連結，直接加入今日。拖住 ⠿ 或者用 ↑↓ 排次序，再估每個地方停留幾耐。</p>
+      <p className="tiny">打店名或者貼 Google 地圖連結，直接加入今日。拖住 ⠿ 或者用 ↑↓ 排次序，估停留同站與站交通；可選填出發時間睇時鐘行程。</p>
       <div className="wish-kinds">
         {(
           [
@@ -3397,64 +3431,111 @@ function DayPlanner({ trip, day, onTrip }: { trip: TripBook; day: TripDay; onTri
 
       {shown.length ? (
         <>
+          <label className="plan-start">
+            <span>出發時間</span>
+            <input
+              type="time"
+              value={day.startTime || ""}
+              aria-label="今日出發時間"
+              onChange={(event) => onTrip(setDayStartTime(trip, day.id, event.target.value || null))}
+            />
+            {day.startTime ? (
+              <button className="stamp" type="button" onClick={() => onTrip(setDayStartTime(trip, day.id, null))}>
+                清除
+              </button>
+            ) : (
+              <span className="tiny">可選，用嚟計到達／離開</span>
+            )}
+          </label>
           <ol className={dragId ? "plan-list dragging" : "plan-list"} ref={listRef}>
-            {shown.map((entry, position) => (
-              <li key={entry.id} data-entry={entry.id} className={entry.id === dragId ? "plan-row lifted" : "plan-row"}>
-                <button
-                  className="plan-grip"
-                  type="button"
-                  aria-label={`拖曳排序：${entry.name}`}
-                  onPointerDown={(event) => dragStart(event, entry.id)}
-                  onPointerMove={dragMove}
-                  onPointerUp={dragEnd}
-                  onPointerCancel={dragEnd}
-                >
-                  <GripVertical size={16} />
-                </button>
-                <span className="plan-pos">{position + 1}</span>
-                <span className="plan-main">
-                  <span className="plan-name">
-                    <em className={`plan-kind ${entry.kind}`}>{PLAN_KIND_LABEL[entry.kind] || entry.kind}</em>
-                    <strong>{entry.name}</strong>
-                  </span>
-                  {entry.address ? <span className="pill-hint">{entry.address}</span> : null}
-                </span>
-                <DwellField
-                  key={`${entry.id}:${entry.dwellMin}`}
-                  value={entry.dwellMin}
-                  name={entry.name}
-                  onSave={(value) => onTrip(setEntryDwell(trip, day.id, entry.id, value))}
-                />
-                <span className="plan-actions">
-                  <button className="stamp icon" type="button" aria-label="上移" disabled={position === 0 || Boolean(dragId)} onClick={() => onTrip(moveDayEntry(trip, day.id, entry.id, -1))}>
-                    <ArrowUp size={14} />
-                  </button>
-                  <button
-                    className="stamp icon"
-                    type="button"
-                    aria-label="下移"
-                    disabled={position === shown.length - 1 || Boolean(dragId)}
-                    onClick={() => onTrip(moveDayEntry(trip, day.id, entry.id, 1))}
-                  >
-                    <ArrowDown size={14} />
-                  </button>
-                  {entry.mapsUrl || entry.address || entry.kind !== "hotel" ? (
-                    <a className="stamp icon" href={mapLink({ ...(entry.kind === "meal" ? day.meals[entry.index] : entry.kind === "hotel" ? day.hotels[entry.index] : day.spots[entry.index]), name: entry.name, address: entry.address } as TripSpot)} target="_blank" rel="noreferrer" aria-label={`喺地圖開：${entry.name}`}>
-                      <MapPin size={14} />
-                    </a>
+            {shown.map((entry, position) => {
+              const stop = scheduleById.get(entry.id);
+              const arrive = stop?.arriveMin != null ? formatClock(stop.arriveMin) : "";
+              const leave = stop?.leaveMin != null ? formatClock(stop.leaveMin) : "";
+              const clock = arrive ? (leave ? `${arrive}–${leave}` : `到 ${arrive}`) : "";
+              return (
+                <Fragment key={entry.id}>
+                  {position > 0 ? (
+                    <TravelLegRow
+                      trip={trip}
+                      day={day}
+                      from={shown[position - 1]}
+                      to={entry}
+                      onTrip={onTrip}
+                    />
                   ) : null}
-                  {entry.kind !== "hotel" ? (
-                    <button className="stamp icon" type="button" aria-label={`移除：${entry.name}`} onClick={() => removeEntry(entry)}>
-                      <Trash2 size={14} />
+                  <li data-entry={entry.id} className={entry.id === dragId ? "plan-row lifted" : "plan-row"}>
+                    <button
+                      className="plan-grip"
+                      type="button"
+                      aria-label={`拖曳排序：${entry.name}`}
+                      onPointerDown={(event) => dragStart(event, entry.id)}
+                      onPointerMove={dragMove}
+                      onPointerUp={dragEnd}
+                      onPointerCancel={dragEnd}
+                    >
+                      <GripVertical size={16} />
                     </button>
-                  ) : null}
-                </span>
-              </li>
-            ))}
+                    <span className="plan-pos">{position + 1}</span>
+                    <span className="plan-main">
+                      <span className="plan-name">
+                        <em className={`plan-kind ${entry.kind}`}>{PLAN_KIND_LABEL[entry.kind] || entry.kind}</em>
+                        <strong>{entry.name}</strong>
+                      </span>
+                      {clock ? <span className="plan-clock">{clock}</span> : null}
+                      {entry.address ? <span className="pill-hint">{entry.address}</span> : null}
+                    </span>
+                    <DwellField
+                      key={`${entry.id}:${entry.dwellMin}`}
+                      value={entry.dwellMin}
+                      name={entry.name}
+                      onSave={(value) => onTrip(setEntryDwell(trip, day.id, entry.id, value))}
+                    />
+                    <span className="plan-actions">
+                      <button className="stamp icon" type="button" aria-label="上移" disabled={position === 0 || Boolean(dragId)} onClick={() => onTrip(moveDayEntry(trip, day.id, entry.id, -1))}>
+                        <ArrowUp size={14} />
+                      </button>
+                      <button
+                        className="stamp icon"
+                        type="button"
+                        aria-label="下移"
+                        disabled={position === shown.length - 1 || Boolean(dragId)}
+                        onClick={() => onTrip(moveDayEntry(trip, day.id, entry.id, 1))}
+                      >
+                        <ArrowDown size={14} />
+                      </button>
+                      {entry.mapsUrl || entry.address || entry.kind !== "hotel" ? (
+                        <a className="stamp icon" href={mapLink({ ...(entry.kind === "meal" ? day.meals[entry.index] : entry.kind === "hotel" ? day.hotels[entry.index] : day.spots[entry.index]), name: entry.name, address: entry.address } as TripSpot)} target="_blank" rel="noreferrer" aria-label={`喺地圖開：${entry.name}`}>
+                          <MapPin size={14} />
+                        </a>
+                      ) : null}
+                      {entry.kind !== "hotel" ? (
+                        <button className="stamp icon" type="button" aria-label={`移除：${entry.name}`} onClick={() => removeEntry(entry)}>
+                          <Trash2 size={14} />
+                        </button>
+                      ) : null}
+                    </span>
+                  </li>
+                </Fragment>
+              );
+            })}
           </ol>
           <p className="plan-total">
             今日預計停留共 <strong>{formatDwell(stats.total)}</strong>
-            {stats.unset ? <span className="tiny"> · {stats.unset} 個地方未估時間</span> : null}
+            {travelTotal ? (
+              <>
+                {" "}
+                · 交通約 <strong>{formatDwell(travelTotal)}</strong>
+              </>
+            ) : null}
+            {stats.total && travelTotal ? (
+              <>
+                {" "}
+                · 全日約 <strong>{formatDwell(fullTotal)}</strong>
+              </>
+            ) : null}
+            {stats.unset ? <span className="tiny"> · {stats.unset} 個地方未估停留</span> : null}
+            {shown.length > 1 && !travelTotal ? <span className="tiny"> · 未估站與站交通</span> : null}
           </p>
         </>
       ) : (
@@ -3521,9 +3602,122 @@ function DayPlanner({ trip, day, onTrip }: { trip: TripBook; day: TripDay; onTri
           </button>
         ) : null}
       </div>
-      <p className="tiny">AI 會跟你排好嘅次序同停留時間補返交通、介紹，出一份同一個行程嘅 JSON；上傳就會更新呢本行程。</p>
+      <p className="tiny">AI 會跟你排好嘅次序、停留同交通時間補返介紹，出一份同一個行程嘅 JSON；上傳就會更新呢本行程。</p>
       {fallback ? <textarea className="prompt-box" readOnly value={fallback} onFocus={(event) => event.currentTarget.select()} /> : null}
     </div>
+  );
+}
+
+function TravelLegRow({
+  trip,
+  day,
+  from,
+  to,
+  onTrip,
+}: {
+  trip: TripBook;
+  day: TripDay;
+  from: PlanEntry;
+  to: PlanEntry;
+  onTrip: (next: TripBook) => void;
+}) {
+  const ride = rideForEntry(day, to.id);
+  const minutes = ride?.travelMin || 0;
+  const mode = ride?.mode || "";
+  const [noteDraft, setNoteDraft] = useState(ride?.note || "");
+  const directions = legDirectionsUrl(day, from.id, to.id);
+
+  useEffect(() => {
+    setNoteDraft(ride?.note || "");
+  }, [ride?.note, to.id]);
+
+  function saveTravel(nextMin: number | null, nextMode: string | null) {
+    onTrip(
+      setLegTravel(trip, day.id, to.id, {
+        travelMin: nextMin,
+        mode: nextMode,
+        note: noteDraft.trim() || "",
+      }),
+    );
+  }
+
+  function commitNote() {
+    const clean = noteDraft.trim();
+    if ((ride?.note || "") === clean) return;
+    onTrip(setLegTravel(trip, day.id, to.id, { note: clean, travelMin: minutes || null, mode: mode || "" }));
+  }
+
+  return (
+    <li className="plan-leg">
+      <div className="plan-leg-head">
+        <span className="plan-leg-label">交通</span>
+        <span className="pill-hint">
+          {from.name} → {to.name}
+        </span>
+        {directions ? (
+          <a className="stamp icon" href={directions} target="_blank" rel="noreferrer" aria-label={`開路線：${from.name} 到 ${to.name}`}>
+            <Navigation size={14} />
+          </a>
+        ) : null}
+      </div>
+      <div className="dwell-pick plan-leg-modes" role="group" aria-label={`${from.name} 到 ${to.name} 交通方式`}>
+        {LEG_TRAVEL_MODES.map((value) => (
+          <button
+            key={value}
+            type="button"
+            className={mode === value ? "stamp on" : "stamp"}
+            aria-pressed={mode === value}
+            onClick={() => saveTravel(minutes || null, mode === value ? "" : value)}
+          >
+            {value}
+          </button>
+        ))}
+      </div>
+      <div className="dwell-pick plan-leg-mins" role="group" aria-label={`${from.name} 到 ${to.name} 交通分鐘`}>
+        {TRAVEL_CHIPS.map((value) => (
+          <button
+            key={value}
+            type="button"
+            className={minutes === value ? "stamp on" : "stamp"}
+            aria-pressed={minutes === value}
+            onClick={() => saveTravel(minutes === value ? null : value, mode || null)}
+          >
+            {value} 分
+          </button>
+        ))}
+        <input
+          className="dwell-input"
+          type="number"
+          inputMode="numeric"
+          min={0}
+          max={720}
+          step={5}
+          value={minutes || ""}
+          placeholder="分鐘"
+          aria-label={`${from.name} 到 ${to.name} 交通分鐘`}
+          onChange={(event) => {
+            const value = Number(event.target.value);
+            const next = event.target.value === "" || !Number.isFinite(value) || value <= 0 ? null : Math.min(720, Math.round(value));
+            saveTravel(next, mode || null);
+          }}
+        />
+      </div>
+      <input
+        className="plan-leg-note"
+        value={noteDraft}
+        placeholder="可選：班次／轉車備註"
+        aria-label={`${from.name} 到 ${to.name} 交通備註`}
+        onChange={(event) => setNoteDraft(event.target.value)}
+        onBlur={commitNote}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            event.currentTarget.blur();
+          }
+        }}
+      />
+      {!minutes && !mode ? <p className="tiny plan-leg-hint">未估交通時間</p> : null}
+    </li>
   );
 }
 
