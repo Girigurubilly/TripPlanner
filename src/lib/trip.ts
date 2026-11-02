@@ -2092,6 +2092,36 @@ export function mapEntryTargets(day: TripDay): MapEntryTarget[] {
   });
 }
 
+
+/** Geocode queries + city bias for one timeline entry (mapsUrl coords handled by caller). */
+export function entryGeocodeQueries(day: TripDay, entryId: string): {
+  queries: string[];
+  bias: { lat: number; lng: number } | null;
+  mapsUrl: string;
+  name: string;
+} {
+  const at = findDayEntry(day, entryId);
+  if (!at) return { queries: [], bias: cityCenter(day.city), mapsUrl: "", name: "" };
+  const record =
+    at.kind === "spot" ? day.spots[at.index] : at.kind === "meal" ? day.meals[at.index] : day.hotels[at.index];
+  if (!record) return { queries: [], bias: cityCenter(day.city), mapsUrl: "", name: "" };
+  const mapsUrl = (record as { mapsUrl?: string }).mapsUrl || "";
+  const base =
+    at.kind === "meal"
+      ? record.address || (record as TripMeal).place || record.name
+      : record.address || record.name;
+  const name = at.kind === "meal" ? (record as TripMeal).place || record.name : record.name;
+  const cityKey = cityKeyFor(base, day.city);
+  const bias = cityCenter(cityKey);
+  if (!canMap(base) && !mapsUrl) return { queries: [], bias, mapsUrl, name };
+  const addressQuery = record.address ? mapQuery(record.address, cityKey) : null;
+  const nameQuery = canMap(name) ? mapQuery(name, cityKey) : null;
+  const town = record.address ? townOfAddress(record.address) : null;
+  const townQuery = town ? mapQuery(town, cityKey) : null;
+  const queries = [...new Set([addressQuery, nameQuery, townQuery].filter((q): q is string => Boolean(q)))];
+  return { queries, bias, mapsUrl, name };
+}
+
 export type NextStop = {
   entry: DayEntry;
   num: number;
@@ -2655,6 +2685,15 @@ export function daySchedule(day: TripDay): DaySchedule {
 }
 
 /** Client-side Google Maps directions URL between two place queries. */
+
+/** Compact arrive/leave label for timeline UI. Empty when no startTime clock. */
+export function stopClockLabel(stop: StopSchedule | undefined | null): string {
+  if (!stop || stop.arriveMin == null) return "";
+  const arrive = formatClock(stop.arriveMin);
+  if (stop.leaveMin == null) return `到 ${arrive}`;
+  return `${arrive}–${formatClock(stop.leaveMin)}`;
+}
+
 export function directionsUrl(fromQuery: string, toQuery: string): string {
   const origin = fromQuery.trim();
   const destination = toQuery.trim();

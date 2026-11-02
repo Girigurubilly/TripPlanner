@@ -213,7 +213,7 @@ type CandidateResult = { point: GeoPoint; district: string | null; coarse: boole
 
 const COARSE_VALUES = new Set(["city", "state", "country", "county"]);
 
-function haversineKm(a: GeoPoint, b: GeoPoint): number {
+export function haversineKm(a: GeoPoint, b: GeoPoint): number {
   const rad = Math.PI / 180;
   const dLat = (b.lat - a.lat) * rad;
   const dLng = (b.lng - a.lng) * rad;
