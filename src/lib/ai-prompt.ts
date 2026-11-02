@@ -53,13 +53,16 @@ export const AI_TRIP_PROMPT = [
   "- walkHtml: 景點之間怎麼走、大約幾分鐘。用 <ol> 或 <p>",
   "- foodHtml: 可留空。如果冇有 meals，先用 <ul><li><strong>店名</strong> — 今日點食</li></ul> 作後備。",
   "- meals: 當日要食的店。每項 { slot, place, note }。slot 用早餐、午餐、下午茶、晚餐。place 必須同 food.places 的 name 完全一樣。note 只寫今日點解去，不要重覆地址和菜單。",
-  "- rides: 當日每一段路程，順序就是出發順序。每項 { from, to, mode, detail, price, note, spot }。",
+  "- rides: 當日每一段路程，順序就是出發順序。每項 { from, to, mode, detail, price, note, spot, entry, travelMin }。",
   "  - from / to: 起點同終點，用旅客認得的地名。",
-  "  - mode: 只可寫步行、地鐵、火車、巴士、的士、飛機、船。",
-  "  - detail: 距離同時間，例如「約0.7km，約9分鐘」。",
+  "  - mode: 只可寫步行、電車、地鐵、火車、巴士、的士、飛機、船、其他。",
+  "  - detail: 距離同時間，例如「約0.7km，約9分鐘」。有 travelMin 時 detail 要寫「約 N 分鐘」。",
+  "  - travelMin: 可選，這段交通分鐘數（整數）。旅客在 App 手填嘅分鐘必須照留。",
   "  - price: 「免費」或確實票價，例如「€2.20」。",
   "  - note: 班次、月台、轉車、上車前提示。沒有就空字串。",
   "  - spot: 如果這段正好落到某個景點，必須同該景點的 name 完全一樣。中途站、餐廳、返酒店就留空字串。",
+  "  - entry: 目的地嘅 timeline id（景點／餐廳／酒店 id）。有就填，方便 App 對位。",
+  "- startTime: 可選，當日出發時間，24 小時制 HH:MM（例如 \"09:30\"）。旅客手填就要保留，並用嚟喺 leadHtml 寫時段。",
   "- noteHtml: 預約、休館、最後入場、天氣、行李",
   "- sun: 可選。{ sunrise, sunset, sunriseCity, sunsetCity }，時間用 24 小時，城市用英文小寫代號。畫面會顯示日出日落。",
   "- images: 沒有真實網址就用 []",
@@ -71,7 +74,7 @@ export const AI_TRIP_PROMPT = [
   "  - address: 街道或區域，純文字。不要只寫在 html。沒有確實地址就留空字串。",
   "  - price: 門票或人均，純文字，要有金額或「免費」。沒有就留空字串。",
   "  - html: 只寫簡介、注意、影相位。不要再重複開放時間、地址、費用這三項。用 <p> 同 <ul><li>。禁止 <details>、<summary>、再重複名稱或 badge。",
-  "  - dwellMin: 可選，建議停留分鐘數（整數，例如 90）。App 會加總成「今日預計停留」。",
+  "  - dwellMin: 可選，建議停留分鐘數（整數，例如 90）。App 會加總成「今日預計停留」。旅客手填就要保留。",
   "",
   "guides 的 html：每個城市一個 <h2>，標題只寫城市中文名，例如 <h2>大阪</h2>，至少兩個城市先有跳轉。城市下面用 <h3> 做小題，不要用 <details>，不要把內容摺起。標題不要加 emoji。",
   "餐廳不要只寫在 html。food 指南加 places 陣列，每日用 meals 指過去，畫面先可以喺當日展開同一間店的地址、菜式同連結。",
@@ -172,15 +175,37 @@ export type PlanPackEntry = {
   note: string;
   dwellMin: number;
   mapsUrl: string;
+  travelBeforeMin?: number;
+  travelMode?: string;
+  travelNote?: string;
+  arrive?: string;
+  leave?: string;
 };
 
-export type PlanPackDay = { id: string; label: string; title: string; entries: PlanPackEntry[] };
+export type PlanPackDay = {
+  id: string;
+  label: string;
+  title: string;
+  startTime?: string;
+  entries: PlanPackEntry[];
+};
 
 function planLine(entry: PlanPackEntry, position: number): string {
   const bits = [
     `${position}. ${PLAN_KIND[entry.kind] || entry.kind}｜${entry.name}`,
     entry.dwellMin ? `停留約 ${entry.dwellMin} 分鐘` : "停留時間未定（請你建議）",
   ];
+  if (entry.travelBeforeMin) {
+    bits.push(
+      `交通約 ${entry.travelBeforeMin} 分鐘${entry.travelMode ? `（${entry.travelMode}）` : ""}`,
+    );
+  } else if (position > 1) {
+    bits.push("交通時間未定（請你建議）");
+  }
+  if (entry.travelNote) bits.push(`交通備註：${entry.travelNote.slice(0, 120)}`);
+  if (entry.arrive || entry.leave) {
+    bits.push(`時段：${entry.arrive || "？"}–${entry.leave || "？"}`);
+  }
   if (entry.address) bits.push(`地址：${entry.address}`);
   if (entry.note) bits.push(`備註：${entry.note.slice(0, 200)}`);
   if (entry.mapsUrl) bits.push(`地圖：${entry.mapsUrl}`);
@@ -188,7 +213,7 @@ function planLine(entry: PlanPackEntry, position: number): string {
   return bits.join("｜");
 }
 
-/** Prompt that hands the user's in-app plan (order + dwell + notes) to an AI
+/** Prompt that hands the user's in-app plan (order + dwell + travel + notes) to an AI
  *  and asks for the full updated TripBook JSON back. One day or the whole trip. */
 export function planningPackPrompt(
   trip: Pick<TripBook, "id" | "title">,
@@ -198,22 +223,30 @@ export function planningPackPrompt(
 ): string {
   const scope = days.length === 1 ? `「${days[0].label} ${days[0].title}」呢一日`.replace(/\s+」/, "」") : "成個行程";
   const plan = days.flatMap((day) => {
-    const total = day.entries.reduce((sum, entry) => sum + (entry.dwellMin || 0), 0);
-    const head = `【${`${day.label} ${day.title}`.trim()}】${total ? `（已估停留共 ${total} 分鐘）` : ""}`;
+    const dwell = day.entries.reduce((sum, entry) => sum + (entry.dwellMin || 0), 0);
+    const travel = day.entries.reduce((sum, entry) => sum + (entry.travelBeforeMin || 0), 0);
+    const bits = [
+      dwell ? `已估停留共 ${dwell} 分鐘` : "",
+      travel ? `已估交通共 ${travel} 分鐘` : "",
+      day.startTime ? `出發 ${day.startTime}` : "",
+    ].filter(Boolean);
+    const head = `【${`${day.label} ${day.title}`.trim()}】${bits.length ? `（${bits.join(" · ")}）` : ""}`;
     return [head, ...(day.entries.length ? day.entries.map((entry, index) => planLine(entry, index + 1)) : ["（未有地方，請按當日城市建議）"]), ""];
   });
   const wishLines = wishes.map((wish) => `- ${wish.dayId}｜${WISH_KIND[wish.kind] || wish.kind}｜${wish.name}${wish.note ? `｜${wish.note}` : ""}`);
   return [
-    `你是資深旅行專家。我已經喺「行程」App 自己排好${scope}嘅地方、次序同停留時間。請根據我嘅規劃，執好成份行程，出一份更新後嘅完整 JSON，用來覆蓋同一個行程。`,
+    `你是資深旅行專家。我已經喺「行程」App 自己排好${scope}嘅地方、次序、停留同交通時間。請根據我嘅規劃，執好成份行程，出一份更新後嘅完整 JSON，用來覆蓋同一個行程。`,
     "",
     "硬性規則：",
     "1. 全程繁體中文。店名、地名可在後面括號附上原文。",
     "2. 只輸出一個 JSON 程式碼區塊，前後不要加解說。schemaVersion 必須是數字 1。id 必須維持「" + trip.id + "」，title 維持「" + trip.title + "」。",
     "3. 以我嘅次序為準：每日 timeline 要跟下面列出嘅順序，保留每項嘅 id。除非有休館、營業時間衝突或明顯折返，否則唔好調位；真係要調，喺該日 noteHtml 用一句講點解。",
-    "4. 停留時間：有寫分鐘就照用，寫入 dwellMin；「未定」嘅請按景點性質建議一個合理分鐘數，寫入 dwellMin。用停留時間加交通時間，喺 leadHtml 寫出大約幾點到幾點。",
-    "5. 補齊每項：景點加 badge、tone、hours、address、price、html；餐廳 place 必須同 name 一樣，並加入 id 為 food 的 guide.places。不確定就寫「出發前再核對」，不要編造票價、營業時間或網址。",
-    "6. 按順序重寫當日 rides（每段 from、to、mode、detail、price、note、entry），entry 填目的地嘅 id；walkHtml 要同 rides 一致。",
-    "7. 保留我冇提到嘅日子、酒店、交通、指南同其他內容。image 留空字串，不要新增 images。html 只用 <p> 或 <ul><li>，禁止 script、iframe、style、on* 屬性。",
+    "4. 停留時間：有寫分鐘就照用，寫入 dwellMin；「未定」嘅請按景點性質建議一個合理分鐘數，寫入 dwellMin。",
+    "5. 交通時間：有寫「交通約 N 分鐘」或方式，必須寫入對應 rides 嘅 travelMin、mode、detail（例如「約 N 分鐘」）、entry（目的地 id）。未定嘅請你建議合理分鐘同方式。唔好刪掉旅客已經手填嘅 travelMin／mode／note。",
+    "6. 若該日有「出發 HH:MM」，寫入 startTime，並用停留＋交通喺 leadHtml 寫出大約幾點到幾點。",
+    "7. 補齊每項：景點加 badge、tone、hours、address、price、html；餐廳 place 必須同 name 一樣，並加入 id 為 food 的 guide.places。不確定就寫「出發前再核對」，不要編造票價、營業時間或網址。",
+    "8. 按順序重寫當日 rides（每段 from、to、mode、detail、price、note、entry、travelMin），entry 填目的地嘅 id；walkHtml 要同 rides 一致。",
+    "9. 保留我冇提到嘅日子、酒店、交通、指南同其他內容。image 留空字串，不要新增 images。html 只用 <p> 或 <ul><li>，禁止 script、iframe、style、on* 屬性。",
     "",
     "我嘅規劃（已排次序）：",
     ...plan,

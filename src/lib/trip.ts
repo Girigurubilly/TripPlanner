@@ -91,6 +91,9 @@ export type TripDay = {
    *  Empty = old-format day: the app renders the legacy way (spots timeline +
    *  今日美食 box) instead of the unified timeline. */
   timeline: string[];
+  /** Optional day start clock (HH:MM, 24h). Used with dwellMin + travelMin
+   *  to show planned arrival/leave on 今日規劃. */
+  startTime?: string;
 };
 
 export type RationalePoint = { label: string; text: string };
@@ -125,6 +128,9 @@ export type Ride = {
   /** Destination entry id (a spot id or a meal id). "" = transit ride.
    *  Synthesized from `spot` at parse time when the JSON omits it. */
   entry: string;
+  /** Planned minutes for this leg (1–720). Omitted = not estimated yet.
+   *  Preferred over parsing `detail`; kept in sync with detail text. */
+  travelMin?: number;
 };
 
 export type DayMeal = {
@@ -1060,18 +1066,20 @@ function parseRides(value: unknown): Ride[] {
     const from = asString(row.from).trim();
     const to = asString(row.to).trim();
     if (!from || !to) return [];
-    return [
-      {
-        from,
-        to,
-        mode: asString(row.mode).trim(),
-        detail: asString(row.detail).trim(),
-        price: asString(row.price).trim(),
-        note: asString(row.note).trim(),
-        spot: asString(row.spot).trim(),
-        entry: asString(row.entry).trim(),
-      },
-    ];
+    const detail = asString(row.detail).trim();
+    const travel = clampTravel(row.travelMin) || minutesFromDetail(detail);
+    const ride: Ride = {
+      from,
+      to,
+      mode: asString(row.mode).trim(),
+      detail,
+      price: asString(row.price).trim(),
+      note: asString(row.note).trim(),
+      spot: asString(row.spot).trim(),
+      entry: asString(row.entry).trim(),
+    };
+    if (travel) ride.travelMin = travel;
+    return [ride];
   });
 }
 
@@ -1260,6 +1268,8 @@ function parseDay(value: unknown, index: number): TripDay {
     })(),
     timeline: [],
   };
+  const start = normalizeStartTime(day.startTime);
+  if (start) parsed.startTime = start;
   // Timeline is validated against the parsed entries (unknown id / duplicate -> legacy path).
   parsed.timeline = parseTimeline(day.timeline, parsed.spots, parsed.meals, parsed.hotels);
   return parsed;
@@ -2260,7 +2270,7 @@ export function reorderDayTimeline(trip: TripBook, dayId: string, orderedIds: st
     const out: string[] = [];
     for (const id of orderedIds) if (known.has(id) && !out.includes(id)) out.push(id);
     for (const id of day.timeline) if (!out.includes(id)) out.push(id);
-    return { ...day, timeline: out };
+    return syncRideEndpoints({ ...day, timeline: out });
   });
 }
 
@@ -2312,14 +2322,14 @@ export function removeDayEntry(trip: TripBook, dayId: string, entryId: string): 
   return mapDay(trip, dayId, (raw) => {
     if (!findDayEntry(raw, entryId)) return raw;
     const day = withTimeline(raw);
-    return {
+    return syncRideEndpoints({
       ...day,
       spots: day.spots.filter((item) => item.id !== entryId),
       meals: day.meals.filter((item) => item.id !== entryId),
       hotels: day.hotels.filter((item) => item.id !== entryId),
       timeline: day.timeline.filter((id) => id !== entryId),
       rides: day.rides.filter((ride) => ride.entry !== entryId),
-    };
+    });
   });
 }
 
@@ -2386,6 +2396,275 @@ export function formatDwell(minutes: number): string {
   const mins = total % 60;
   if (!hours) return `${mins} 分`;
   return mins ? `${hours} 小時 ${mins} 分` : `${hours} 小時`;
+}
+
+/** Travel minutes clamped to 0–720. 0 means "not set". */
+export function clampTravel(value: unknown): number {
+  return clampDwell(value);
+}
+
+/** Pull a minutes estimate out of free-text detail, e.g. 「約15分鐘」/ "about 20 min". */
+export function minutesFromDetail(detail: string): number {
+  const text = detail || "";
+  const zh = text.match(/(\d+)\s*分/);
+  if (zh) return clampTravel(zh[1]);
+  const en = text.match(/(\d+)\s*(?:min|mins|minutes)\b/i);
+  return en ? clampTravel(en[1]) : 0;
+}
+
+/** Keep detail readable when the user sets travelMin. Preserves non-duration text. */
+export function travelDetailFor(minutes: number, previous = ""): string {
+  const mins = clampTravel(minutes);
+  if (!mins) return previous.trim();
+  const label = `約 ${mins} 分鐘`;
+  const stripped = previous
+    .replace(/約?\s*\d+\s*分鐘?/g, " ")
+    .replace(/約?\s*\d+\s*(?:min|mins|minutes)\b/gi, " ")
+    .replace(/\s+/g, " ")
+    .replace(/^[·,，、\s]+|[·,，、\s]+$/g, "")
+    .trim();
+  return stripped ? `${stripped}，${label}` : label;
+}
+
+/** Normalize "9:5" / "09:05" / "9：05" → "09:05". "" when invalid. */
+export function normalizeStartTime(value: unknown): string {
+  const raw = asString(value).trim().replace(/：/g, ":");
+  const match = raw.match(/^(\d{1,2}):(\d{1,2})$/);
+  if (!match) return "";
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  if (!Number.isInteger(hour) || !Number.isInteger(minute) || hour > 23 || minute > 59) return "";
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+}
+
+/** Minutes from midnight for an HH:MM string, or null. */
+export function minutesFromClock(value: string): number | null {
+  const clock = normalizeStartTime(value);
+  if (!clock) return null;
+  const [hour, minute] = clock.split(":").map(Number);
+  return hour * 60 + minute;
+}
+
+/** "09:05" from minutes-from-midnight (wraps past midnight). */
+export function formatClock(minutes: number): string {
+  const total = ((Math.round(minutes) % 1440) + 1440) % 1440;
+  const hour = Math.floor(total / 60);
+  const minute = total % 60;
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+}
+
+const PLANNER_MODES = ["步行", "電車", "地鐵", "巴士", "的士", "其他"] as const;
+export type PlannerMode = (typeof PLANNER_MODES)[number];
+export const LEG_TRAVEL_MODES: readonly PlannerMode[] = PLANNER_MODES;
+
+export function normalizePlannerMode(value: unknown): string {
+  const mode = asString(value).trim();
+  if (!mode) return "";
+  if ((PLANNER_MODES as readonly string[]).includes(mode)) return mode;
+  if (/步行|行路|walk/i.test(mode)) return "步行";
+  if (/電車|tram|有軌/i.test(mode)) return "電車";
+  if (/地鐵|捷運|metro|subway/i.test(mode)) return "地鐵";
+  if (/巴士|公車|bus/i.test(mode)) return "巴士";
+  if (/的士|計程車|taxi/i.test(mode)) return "的士";
+  if (/火車|高鐵|train|rail/i.test(mode)) return "其他";
+  return mode.slice(0, 12);
+}
+
+function entryDisplayName(day: TripDay, entryId: string): string {
+  const at = findDayEntry(day, entryId);
+  if (!at) return "";
+  if (at.kind === "meal") {
+    const meal = day.meals[at.index];
+    return (meal?.name || meal?.place || "").trim();
+  }
+  const entry = at.kind === "spot" ? day.spots[at.index] : day.hotels[at.index];
+  return (entry?.name || "").trim();
+}
+
+function entryMapsQuery(day: TripDay, entryId: string): string {
+  const at = findDayEntry(day, entryId);
+  if (!at) return "";
+  if (at.kind === "meal") {
+    const meal = day.meals[at.index];
+    return (meal?.mapsUrl || meal?.address || meal?.place || meal?.name || "").trim();
+  }
+  const entry = at.kind === "spot" ? day.spots[at.index] : day.hotels[at.index];
+  return (entry?.mapsUrl || entry?.address || entry?.name || "").trim();
+}
+
+/** After a reorder/remove, keep paired rides pointing at the new previous stop. */
+export function syncRideEndpoints(day: TripDay): TripDay {
+  const order = dayOrder(day);
+  if (!order.length) return day;
+  let changed = false;
+  const rides = day.rides.map((ride) => {
+    if (!ride.entry) return ride;
+    const index = order.indexOf(ride.entry);
+    if (index < 0) return ride;
+    const to = entryDisplayName(day, ride.entry) || ride.to;
+    const from = index > 0 ? entryDisplayName(day, order[index - 1]) || ride.from : ride.from;
+    if (from === ride.from && to === ride.to && (!to || ride.spot === to || !ride.spot)) return ride;
+    changed = true;
+    return { ...ride, from, to, spot: ride.spot ? to : ride.spot };
+  });
+  return changed ? { ...day, rides } : day;
+}
+
+export type LegTravelInput = {
+  travelMin?: number | null;
+  mode?: string | null;
+  note?: string | null;
+};
+
+/** Upsert the ride that lands on `toEntryId` (inter-stop leg). Clear with
+ *  travelMin null + empty mode/note to drop a sparse planner-only ride. */
+export function setLegTravel(trip: TripBook, dayId: string, toEntryId: string, input: LegTravelInput): TripBook {
+  return mapDay(trip, dayId, (raw) => {
+    const day = withTimeline(raw);
+    if (!day.timeline.includes(toEntryId) && !findDayEntry(day, toEntryId)) return raw;
+    const order = dayOrder(day);
+    const index = order.indexOf(toEntryId);
+    const toName = entryDisplayName(day, toEntryId);
+    if (!toName) return raw;
+    const fromName = index > 0 ? entryDisplayName(day, order[index - 1]) : "";
+    const travel = input.travelMin === undefined ? undefined : clampTravel(input.travelMin);
+    const mode = input.mode === undefined ? undefined : normalizePlannerMode(input.mode);
+    const note = input.note === undefined ? undefined : asString(input.note).trim().slice(0, 120);
+    const existingIndex = day.rides.findIndex((ride) => ride.entry === toEntryId);
+    const existing = existingIndex >= 0 ? day.rides[existingIndex] : null;
+
+    if (!existing) {
+      const nextTravel = travel || 0;
+      const nextMode = mode || "";
+      const nextNote = note || "";
+      if (!nextTravel && !nextMode && !nextNote) return day;
+      const ride: Ride = {
+        from: fromName || "出發",
+        to: toName,
+        mode: nextMode,
+        detail: nextTravel ? travelDetailFor(nextTravel) : "",
+        price: "",
+        note: nextNote,
+        spot: toName,
+        entry: toEntryId,
+        ...(nextTravel ? { travelMin: nextTravel } : {}),
+      };
+      return { ...day, rides: [...day.rides, ride] };
+    }
+
+    const copy: Ride = {
+      ...existing,
+      from: fromName || existing.from,
+      to: toName,
+      spot: existing.spot ? toName : existing.spot,
+    };
+    if (travel !== undefined) {
+      if (travel) {
+        copy.travelMin = travel;
+        copy.detail = travelDetailFor(travel, existing.detail);
+      } else {
+        delete copy.travelMin;
+        copy.detail = travelDetailFor(0, existing.detail.replace(/約?\s*\d+\s*分鐘?/g, " ").replace(/\s+/g, " ").trim());
+      }
+    }
+    if (mode !== undefined) copy.mode = mode;
+    if (note !== undefined) copy.note = note;
+
+    const sparse = !copy.travelMin && !copy.mode && !copy.detail && !copy.price && !copy.note;
+    const rides = [...day.rides];
+    if (sparse) rides.splice(existingIndex, 1);
+    else rides[existingIndex] = copy;
+    return { ...day, rides };
+  });
+}
+
+/** Set or clear the day's optional start clock (HH:MM). */
+export function setDayStartTime(trip: TripBook, dayId: string, startTime: string | null): TripBook {
+  const clock = startTime ? normalizeStartTime(startTime) : "";
+  return mapDay(trip, dayId, (day) => {
+    if (!clock) {
+      if (!day.startTime) return day;
+      const copy = { ...day };
+      delete copy.startTime;
+      return copy;
+    }
+    if (day.startTime === clock) return day;
+    return { ...day, startTime: clock };
+  });
+}
+
+/** Ride attached to a destination entry id, if any. */
+export function rideForEntry(day: TripDay, entryId: string): Ride | null {
+  return day.rides.find((ride) => ride.entry === entryId) || null;
+}
+
+/** Resolved travel minutes for a ride (structured field, else detail text). */
+export function rideTravelMin(ride: Ride | null | undefined): number {
+  if (!ride) return 0;
+  return clampTravel(ride.travelMin) || minutesFromDetail(ride.detail);
+}
+
+/** Sum of inter-stop travel minutes that are set on the day. */
+export function dayTravelTotal(day: TripDay): number {
+  const order = new Set(dayOrder(day));
+  return day.rides.reduce((sum, ride) => {
+    if (ride.entry && !order.has(ride.entry)) return sum;
+    return sum + rideTravelMin(ride);
+  }, 0);
+}
+
+export type StopSchedule = {
+  entryId: string;
+  travelBeforeMin: number;
+  dwellMin: number;
+  arriveMin: number | null;
+  leaveMin: number | null;
+};
+
+export type DaySchedule = {
+  startMin: number | null;
+  stops: StopSchedule[];
+  travelTotal: number;
+  dwellTotal: number;
+  endMin: number | null;
+};
+
+/** Planned arrive/leave windows from startTime + travelMin + dwellMin.
+ *  Missing start or a missing dwell breaks the clock for later stops. */
+export function daySchedule(day: TripDay): DaySchedule {
+  const entries = planEntries(day);
+  const startMin = day.startTime ? minutesFromClock(day.startTime) : null;
+  let cursor = startMin;
+  let travelTotal = 0;
+  const stops: StopSchedule[] = entries.map((entry) => {
+    const travelBeforeMin = rideTravelMin(rideForEntry(day, entry.id));
+    if (travelBeforeMin) travelTotal += travelBeforeMin;
+    const dwellMin = entry.dwellMin || 0;
+    const arriveMin = cursor == null ? null : cursor + travelBeforeMin;
+    const leaveMin = arriveMin == null || !dwellMin ? null : arriveMin + dwellMin;
+    cursor = leaveMin;
+    return { entryId: entry.id, travelBeforeMin, dwellMin, arriveMin, leaveMin };
+  });
+  return {
+    startMin,
+    stops,
+    travelTotal,
+    dwellTotal: dayDwellTotal(day),
+    endMin: stops.length ? stops[stops.length - 1].leaveMin : startMin,
+  };
+}
+
+/** Client-side Google Maps directions URL between two place queries. */
+export function directionsUrl(fromQuery: string, toQuery: string): string {
+  const origin = fromQuery.trim();
+  const destination = toQuery.trim();
+  if (!origin || !destination) return "";
+  return `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(origin)}&destination=${encodeURIComponent(destination)}`;
+}
+
+/** Directions between two timeline entry ids on a day. */
+export function legDirectionsUrl(day: TripDay, fromEntryId: string, toEntryId: string): string {
+  return directionsUrl(entryMapsQuery(day, fromEntryId), entryMapsQuery(day, toEntryId));
 }
 
 /** Turn a wish into a real day entry (souvenir shops become sights tagged 手信).
