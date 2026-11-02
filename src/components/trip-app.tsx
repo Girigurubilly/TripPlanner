@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { TripMap } from "./trip-map";
 import {
   BookOpen,
@@ -16,6 +16,9 @@ import {
   Wallet,
   TrainFront,
   Trash2,
+  GripVertical,
+  ArrowUp,
+  ArrowDown,
   Upload,
   Navigation,
   Search,
@@ -65,6 +68,20 @@ import {
   planItems,
   removeExtra,
   removeWish,
+  addDayPlace,
+  dayDwellStats,
+  findDayEntry,
+  formatDwell,
+  moveDayEntry,
+  planEntries,
+  promoteWishToDay,
+  removeDayEntry,
+  reorderDayTimeline,
+  saveTrips,
+  setEntryDwell,
+  shiftVisitsOnRemove,
+  writeTripVisits,
+  type PlanEntry,
   type DayEntry,
   type ExtraStop,
   type WishKind,
@@ -78,7 +95,7 @@ import {
 import { t } from "@/lib/i18n";
 import { DrivePanel } from "@/components/drive-panel";
 import { syncTripDriveIfDue } from "@/lib/drive-sync";
-import { AI_TRIP_PROMPT, wishUpdatePrompt } from "@/lib/ai-prompt";
+import { AI_TRIP_PROMPT, planningPackPrompt, wishUpdatePrompt, type PlanPackDay } from "@/lib/ai-prompt";
 import { LOGGED_KEY, MONEY_WINDOW, openMoney, plainClick, dayCostItems, dayIdForDate, formatSpend, moneyEstimateUrl, rideRef, rideSpendLabel, tripCosts, tripEstimate, type SpendItem, type TripCosts, loadLoggedKeys, loadMoneyLinks, loadSentKeys, markSent, moneyLinkBackUrl, moneySpendUrl, moneyTripIdForBook, rankTripBooks, readMoneyRef, rememberMoneyRef, saveMoneyLink, spendItem, spendTimeHint, type MoneyTripRef, type SpendCategory } from "@/lib/money-link";
 import { placeFromMaps, resolveMapsPlace, shortMapsLink } from "@/lib/maps-place";
 import { startLocate, type PlaceFix } from "@/lib/geo";
@@ -729,6 +746,11 @@ export function TripApp() {
       onTab={setTab}
       onDay={setDayId}
       onBack={() => setOpenId("")}
+      onTrip={(next) => {
+        const list = trips.map((item) => (item.id === next.id ? next : item));
+        saveTrips(list);
+        setTrips(list);
+      }}
     />
   );
 }
@@ -805,6 +827,7 @@ function Book({
   onTab,
   onDay,
   onBack,
+  onTrip,
 }: {
   trip: TripBook;
   tab: string;
@@ -812,6 +835,7 @@ function Book({
   onTab: (id: string) => void;
   onDay: (id: string) => void;
   onBack: () => void;
+  onTrip: (next: TripBook) => void;
 }) {
   const activeTab = tab || (trip.days.length ? "days" : "overview");
   const activeDay = trip.days.find((day) => day.id === dayId) || trip.days[0];
@@ -1264,6 +1288,7 @@ function Book({
             }}
             onMap={() => onTab("map")}
             visits={visits}
+            onTrip={onTrip}
           />
         ) : null}
 
@@ -2015,6 +2040,7 @@ function DayScreen({
   onMeal,
   onHotel,
   onMap,
+  onTrip,
 }: {
   trip: TripBook;
   day: TripDay;
@@ -2024,6 +2050,7 @@ function DayScreen({
   onMeal: (index: number) => void;
   onHotel: (index: number) => void;
   onMap: () => void;
+  onTrip: (next: TripBook) => void;
 }) {
   const index = trip.days.findIndex((item) => item.id === day.id);
   const rationale = trip.rationales.find((item) => item.city && item.city === day.city);
@@ -2142,7 +2169,7 @@ function DayScreen({
           )
         ) : null}
       </div>
-      {day.spots.length || day.rides.length ? (
+      {day.spots.length || day.rides.length || day.timeline.length ? (
         <>
           <h2 className="section-label">
             今日行程
@@ -2344,7 +2371,7 @@ function DayScreen({
           <Html html={day.noteHtml} />
         </div>
       ) : null}
-      <WishPlaces trip={trip} day={day} />
+      <DayPlanner key={`plan-${day.id}`} trip={trip} day={day} onTrip={onTrip} />
       <ExtraStops tripId={trip.id} dayId={day.id} />
       {rationale ? (
         <section className="why">
@@ -3105,15 +3132,34 @@ function DayNav({
   );
 }
 
-function WishPlaces({ trip, day }: { trip: TripBook; day: TripDay }) {
+const DWELL_CHIPS = [30, 60, 90, 120] as const;
+const PLAN_KIND_LABEL: Record<string, string> = { spot: "景點", meal: "餐廳", hotel: "住宿" };
+
+/** 今日規劃: add places (name or pasted Google Maps link) straight into the
+ *  day, reorder by drag or ↑↓, estimate time at each stop, then pack the plan
+ *  for AI. Wishes stay as a softer "maybe" list that can be promoted. */
+function DayPlanner({ trip, day, onTrip }: { trip: TripBook; day: TripDay; onTrip: (next: TripBook) => void }) {
   const [rows, setRows] = useState(loadWishes(trip.id));
   const [kind, setKind] = useState<WishKind>("sight");
   const [name, setName] = useState("");
+  const [address, setAddress] = useState("");
   const [note, setNote] = useState("");
+  const [mapsUrl, setMapsUrl] = useState("");
+  const [dwell, setDwell] = useState<number | null>(null);
   const [fallback, setFallback] = useState("");
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState("");
   const [reading, setReading] = useState("");
+  const [flash, setFlash] = useState("");
+  const [dragId, setDragId] = useState("");
+  const [dragOrder, setDragOrder] = useState<string[] | null>(null);
+  const orderRef = useRef<string[] | null>(null);
+  const listRef = useRef<HTMLOListElement>(null);
+  const formRef = useRef<HTMLInputElement>(null);
   const dayRows = rows.filter((row) => row.dayId === day.id);
+  const entries = planEntries(day);
+  const byId = new Map(entries.map((entry) => [entry.id, entry]));
+  const shown = (dragOrder || entries.map((entry) => entry.id)).map((id) => byId.get(id)).filter((entry): entry is PlanEntry => Boolean(entry));
+  const stats = dayDwellStats(day);
 
   useEffect(() => {
     const load = () => setRows(loadWishes(trip.id));
@@ -3122,28 +3168,166 @@ function WishPlaces({ trip, day }: { trip: TripBook; day: TripDay }) {
     return () => window.removeEventListener("trip-wishes", load);
   }, [trip.id]);
 
-  function refresh() {
+  useEffect(() => {
+    if (!flash) return;
+    const timer = window.setTimeout(() => setFlash(""), 1600);
+    return () => window.clearTimeout(timer);
+  }, [flash]);
+
+  function refreshWishes() {
     window.dispatchEvent(new Event("trip-wishes"));
   }
 
-  async function copyForAi() {
-    const wishes = loadWishes(trip.id);
-    const labels = Object.fromEntries(trip.days.map((item) => [item.id, `${item.label} ${item.title}`.trim()]));
-    const text = wishUpdatePrompt(trip, wishes, labels, trip);
+  function resetForm() {
+    setName("");
+    setAddress("");
+    setNote("");
+    setMapsUrl("");
+    setDwell(null);
+    setReading("");
+  }
+
+  function onPlaceInput(value: string) {
+    const link = /^https:\/\//i.test(value.trim()) ? value.trim() : "";
+    const parsed = placeFromMaps(value);
+    if (parsed?.name) {
+      setReading("");
+      setName(parsed.name);
+      if (link) setMapsUrl(link);
+      if (parsed.note) setAddress((current) => current || parsed.note);
+      return;
+    }
+    setName(value);
+    const short = shortMapsLink(value);
+    if (!short) {
+      setReading("");
+      if (!link) setMapsUrl("");
+      return;
+    }
+    setMapsUrl(link);
+    setReading("讀緊地名…");
+    void resolveMapsPlace(value).then((found) => {
+      setName((current) => {
+        if (current !== value && shortMapsLink(current) !== short) return current;
+        setReading(found?.name ? "" : "短連結讀唔到店名，請打返個名（連結會保留）");
+        return found?.name || "";
+      });
+      if (found?.note) setAddress((current) => current || found.note);
+    });
+  }
+
+  function addToDay() {
+    const clean = name.trim();
+    if (!clean || /^https?:\/\//i.test(clean)) return;
+    const result = addDayPlace(trip, day.id, {
+      kind: kind === "meal" ? "meal" : "sight",
+      name: clean,
+      address,
+      note,
+      dwellMin: dwell,
+      mapsUrl,
+      badge: kind === "souvenir" ? "手信" : "",
+    });
+    if (!result.id) return;
+    onTrip(result.trip);
+    setFlash(`已加入：${clean}`);
+    setCopied("");
+    resetForm();
+  }
+
+  function addToWishes() {
+    const clean = name.trim();
+    if (!clean || /^https?:\/\//i.test(clean)) return;
+    addWish(trip.id, { dayId: day.id, kind, name: clean, note: [address, note].filter(Boolean).join("｜") });
+    setFlash(`已記低喺願望清單：${clean}`);
+    setCopied("");
+    resetForm();
+    refreshWishes();
+  }
+
+  function removeEntry(entry: PlanEntry) {
+    if (!window.confirm(`由今日行程移除「${entry.name}」？`)) return;
+    const at = findDayEntry(day, entry.id);
+    const next = removeDayEntry(trip, day.id, entry.id);
+    if (at) {
+      writeTripVisits(trip.id, shiftVisitsOnRemove(loadVisits(trip.id), day.id, at));
+      window.dispatchEvent(new Event("trip-visits"));
+    }
+    onTrip(next);
+  }
+
+  // Pointer-driven drag on the grip handle: works with mouse, pen and touch.
+  function dragStart(event: ReactPointerEvent<HTMLButtonElement>, id: string) {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    const order = entries.map((entry) => entry.id);
+    orderRef.current = order;
+    setDragOrder(order);
+    setDragId(id);
+  }
+
+  function dragMove(event: ReactPointerEvent<HTMLButtonElement>) {
+    if (!dragId || !orderRef.current || !listRef.current) return;
+    const others = [...listRef.current.querySelectorAll<HTMLElement>("[data-entry]")].filter((row) => row.dataset.entry !== dragId);
+    let target = 0;
+    for (const row of others) {
+      const box = row.getBoundingClientRect();
+      if (event.clientY > box.top + box.height / 2) target++;
+    }
+    const rest = orderRef.current.filter((id) => id !== dragId);
+    const next = [...rest.slice(0, target), dragId, ...rest.slice(target)];
+    if (next.join("|") === orderRef.current.join("|")) return;
+    orderRef.current = next;
+    setDragOrder(next);
+  }
+
+  function dragEnd() {
+    const order = orderRef.current;
+    const before = entries.map((entry) => entry.id).join("|");
+    orderRef.current = null;
+    setDragOrder(null);
+    setDragId("");
+    if (order && order.join("|") !== before) onTrip(reorderDayTimeline(trip, day.id, order));
+  }
+
+  function packDays(list: TripDay[]): PlanPackDay[] {
+    return list.map((item) => ({ id: item.id, label: item.label, title: item.title, entries: planEntries(item) }));
+  }
+
+  async function copyText(text: string, label: string) {
     try {
       await navigator.clipboard.writeText(text);
       setFallback("");
-      setCopied(true);
+      setCopied(label);
     } catch {
-      setCopied(false);
+      setCopied("");
       setFallback(text);
     }
   }
 
+  function copyDay() {
+    void copyText(planningPackPrompt(trip, packDays([day]), trip, dayRows), "day");
+  }
+
+  function copyTrip() {
+    void copyText(planningPackPrompt(trip, packDays(trip.days), trip, loadWishes(trip.id)), "trip");
+  }
+
+  function copyWishes() {
+    const wishes = loadWishes(trip.id);
+    const labels = Object.fromEntries(trip.days.map((item) => [item.id, `${item.label} ${item.title}`.trim()]));
+    void copyText(wishUpdatePrompt(trip, wishes, labels, trip), "wish");
+  }
+
+  const canAdd = Boolean(name.trim()) && !/^https?:\/\//i.test(name.trim());
+
   return (
-    <div className="extras">
-      <h2 className="section-label">想加的地方</h2>
-      <p className="tiny">先記低景點、餐廳或手信店。複製俾 AI 之後，佢會出一份同一個行程的 JSON，再上傳就會更新。</p>
+    <div className="extras planner">
+      <h2 className="section-label">
+        今日規劃 <small>{entries.length ? `${entries.length} 個地方` : "未有地方"}</small>
+      </h2>
+      <p className="tiny">打店名或者貼 Google 地圖連結，直接加入今日。拖住 ⠿ 或者用 ↑↓ 排次序，再估每個地方停留幾耐。</p>
       <div className="wish-kinds">
         {(
           [
@@ -3152,90 +3336,230 @@ function WishPlaces({ trip, day }: { trip: TripBook; day: TripDay }) {
             ["souvenir", "手信"],
           ] as const
         ).map(([value, label]) => (
-          <button key={value} className={kind === value ? "stamp on" : "stamp"} type="button" onClick={() => setKind(value)}>
+          <button key={value} className={kind === value ? "stamp on" : "stamp"} type="button" aria-pressed={kind === value} onClick={() => setKind(value)}>
             {label}
           </button>
         ))}
       </div>
       <form
-        className="here"
+        className="here plan-form"
         onSubmit={(event) => {
           event.preventDefault();
-          if (!name.trim()) return;
-          addWish(trip.id, { dayId: day.id, kind, name, note });
-          setName("");
-          setNote("");
-          setCopied(false);
-          refresh();
+          addToDay();
         }}
       >
-        <input
-          value={name}
-          placeholder="店名，或者貼 Google 地圖連結"
-          aria-label="店名或景點"
-          onChange={(event) => {
-            const value = event.target.value;
-            const parsed = placeFromMaps(value);
-            if (parsed?.name) {
-              setReading("");
-              setName(parsed.name);
-              if (parsed.note) setNote(parsed.note);
-              return;
-            }
-            setName(value);
-            const short = shortMapsLink(value);
-            if (!short) {
-              setReading("");
-              return;
-            }
-            setReading("讀緊地名…");
-            void resolveMapsPlace(value).then((found) => {
-              setName((current) => {
-                if (current !== value && shortMapsLink(current) !== short) return current;
-                setReading(found?.name ? "" : "短連結讀唔到店名，請打返個名");
-                return found?.name || current;
-              });
-              if (found?.note) setNote((current) => current || found.note);
-            });
-          }}
-        />
-        {reading ? <p className="tiny">{reading}</p> : null}
-        <input value={note} placeholder="可選：點解要去、附近邊度" aria-label="備註" onChange={(event) => setNote(event.target.value)} />
-        <button className="btn primary" type="submit" disabled={!name.trim()}>
-          加入呢日
-        </button>
-      </form>
-      {dayRows.length ? (
-        <div className="sheet">
-          {dayRows.map((row) => (
-            <div className="extra-row" key={row.id}>
-              <strong>
-                {row.kind === "meal" ? "餐廳" : row.kind === "souvenir" ? "手信" : "景點"} · {row.name}
-              </strong>
-              {row.note ? <span className="pill-hint">{row.note}</span> : null}
-              <span className="extra-actions">
-                <button
-                  className="stamp"
-                  type="button"
-                  onClick={() => {
-                    removeWish(trip.id, row.id);
-                    refresh();
-                  }}
-                >
-                  刪除
-                </button>
-              </span>
-            </div>
+        <input ref={formRef} value={name} placeholder="店名或貼 Google 地圖連結" aria-label="店名或貼 Google 地圖連結" onChange={(event) => onPlaceInput(event.target.value)} />
+        {reading ? (
+          <p className="tiny plan-reading" role="status">
+            {reading}
+          </p>
+        ) : null}
+        {mapsUrl && !reading ? <p className="tiny plan-reading">已附地圖連結 ✓</p> : null}
+        <input value={address} placeholder="可選：地址／區域" aria-label="地址" onChange={(event) => setAddress(event.target.value)} />
+        <input value={note} placeholder="可選：備註（點解要去、想食乜）" aria-label="備註" onChange={(event) => setNote(event.target.value)} />
+        <div className="dwell-pick" role="group" aria-label="停留時間">
+          <span className="tiny">停留</span>
+          {DWELL_CHIPS.map((value) => (
+            <button key={value} type="button" className={dwell === value ? "stamp on" : "stamp"} aria-pressed={dwell === value} onClick={() => setDwell(dwell === value ? null : value)}>
+              {value < 60 ? `${value} 分` : formatDwell(value).replace(" 小時", "h").replace(" 分", "m").replace(/\s/g, "")}
+            </button>
           ))}
+          <input
+            className="dwell-input"
+            type="number"
+            inputMode="numeric"
+            min={0}
+            max={720}
+            step={5}
+            value={dwell ?? ""}
+            placeholder="分鐘"
+            aria-label="停留分鐘"
+            onChange={(event) => {
+              const value = Number(event.target.value);
+              setDwell(event.target.value === "" || !Number.isFinite(value) || value <= 0 ? null : Math.min(720, Math.round(value)));
+            }}
+          />
         </div>
+        <div className="plan-buttons">
+          <button className="btn primary" type="submit" disabled={!canAdd}>
+            加入行程
+          </button>
+          <button className="btn ghost" type="button" disabled={!canAdd} onClick={addToWishes}>
+            仍只加入願望清單
+          </button>
+        </div>
+        {flash ? (
+          <p className="tiny plan-flash" role="status">
+            {flash}
+          </p>
+        ) : null}
+      </form>
+
+      {shown.length ? (
+        <>
+          <ol className={dragId ? "plan-list dragging" : "plan-list"} ref={listRef}>
+            {shown.map((entry, position) => (
+              <li key={entry.id} data-entry={entry.id} className={entry.id === dragId ? "plan-row lifted" : "plan-row"}>
+                <button
+                  className="plan-grip"
+                  type="button"
+                  aria-label={`拖曳排序：${entry.name}`}
+                  onPointerDown={(event) => dragStart(event, entry.id)}
+                  onPointerMove={dragMove}
+                  onPointerUp={dragEnd}
+                  onPointerCancel={dragEnd}
+                >
+                  <GripVertical size={16} />
+                </button>
+                <span className="plan-pos">{position + 1}</span>
+                <span className="plan-main">
+                  <span className="plan-name">
+                    <em className={`plan-kind ${entry.kind}`}>{PLAN_KIND_LABEL[entry.kind] || entry.kind}</em>
+                    <strong>{entry.name}</strong>
+                  </span>
+                  {entry.address ? <span className="pill-hint">{entry.address}</span> : null}
+                </span>
+                <DwellField
+                  key={`${entry.id}:${entry.dwellMin}`}
+                  value={entry.dwellMin}
+                  name={entry.name}
+                  onSave={(value) => onTrip(setEntryDwell(trip, day.id, entry.id, value))}
+                />
+                <span className="plan-actions">
+                  <button className="stamp icon" type="button" aria-label="上移" disabled={position === 0 || Boolean(dragId)} onClick={() => onTrip(moveDayEntry(trip, day.id, entry.id, -1))}>
+                    <ArrowUp size={14} />
+                  </button>
+                  <button
+                    className="stamp icon"
+                    type="button"
+                    aria-label="下移"
+                    disabled={position === shown.length - 1 || Boolean(dragId)}
+                    onClick={() => onTrip(moveDayEntry(trip, day.id, entry.id, 1))}
+                  >
+                    <ArrowDown size={14} />
+                  </button>
+                  {entry.mapsUrl || entry.address || entry.kind !== "hotel" ? (
+                    <a className="stamp icon" href={mapLink({ ...(entry.kind === "meal" ? day.meals[entry.index] : entry.kind === "hotel" ? day.hotels[entry.index] : day.spots[entry.index]), name: entry.name, address: entry.address } as TripSpot)} target="_blank" rel="noreferrer" aria-label={`喺地圖開：${entry.name}`}>
+                      <MapPin size={14} />
+                    </a>
+                  ) : null}
+                  {entry.kind !== "hotel" ? (
+                    <button className="stamp icon" type="button" aria-label={`移除：${entry.name}`} onClick={() => removeEntry(entry)}>
+                      <Trash2 size={14} />
+                    </button>
+                  ) : null}
+                </span>
+              </li>
+            ))}
+          </ol>
+          <p className="plan-total">
+            今日預計停留共 <strong>{formatDwell(stats.total)}</strong>
+            {stats.unset ? <span className="tiny"> · {stats.unset} 個地方未估時間</span> : null}
+          </p>
+        </>
+      ) : (
+        <div className="plan-empty">
+          <p>今日仲未有地方。</p>
+          <button className="btn ghost" type="button" onClick={() => formRef.current?.focus()}>
+            加第一個地方
+          </button>
+        </div>
+      )}
+
+      {dayRows.length ? (
+        <>
+          <h3 className="section-label plan-sub">願望清單（未入行程）</h3>
+          <div className="sheet">
+            {dayRows.map((row) => (
+              <div className="extra-row" key={row.id}>
+                <strong>
+                  {row.kind === "meal" ? "餐廳" : row.kind === "souvenir" ? "手信" : "景點"} · {row.name}
+                </strong>
+                {row.note ? <span className="pill-hint">{row.note}</span> : null}
+                <span className="extra-actions">
+                  <button
+                    className="stamp on"
+                    type="button"
+                    onClick={() => {
+                      const result = promoteWishToDay(trip, row);
+                      if (!result.id) return;
+                      onTrip(result.trip);
+                      removeWish(trip.id, row.id);
+                      refreshWishes();
+                      setFlash(`已加入：${row.name}`);
+                    }}
+                  >
+                    加入行程
+                  </button>
+                  <button
+                    className="stamp"
+                    type="button"
+                    onClick={() => {
+                      removeWish(trip.id, row.id);
+                      refreshWishes();
+                    }}
+                  >
+                    刪除
+                  </button>
+                </span>
+              </div>
+            ))}
+          </div>
+        </>
       ) : null}
-      {rows.length ? (
-        <button className="btn primary" type="button" onClick={() => void copyForAi()}>
-          {copied ? "已複製，貼去 Grok 或 Muse" : `複製 ${rows.length} 項俾 AI 更新`}
+
+      <div className="plan-ai">
+        <button className="btn primary" type="button" onClick={copyDay} disabled={!entries.length && !dayRows.length}>
+          <Copy size={15} /> {copied === "day" ? "已複製，貼去 Grok 或 Muse" : "複製今日計劃俾 AI"}
         </button>
-      ) : null}
-      {fallback ? <textarea className="prompt-box" readOnly value={fallback} /> : null}
+        <button className="btn ghost" type="button" onClick={copyTrip}>
+          {copied === "trip" ? "已複製成個行程" : "複製成個行程計劃俾 AI"}
+        </button>
+        {rows.length ? (
+          <button className="btn ghost" type="button" onClick={copyWishes}>
+            {copied === "wish" ? "已複製願望清單" : `只複製 ${rows.length} 項願望俾 AI 更新`}
+          </button>
+        ) : null}
+      </div>
+      <p className="tiny">AI 會跟你排好嘅次序同停留時間補返交通、介紹，出一份同一個行程嘅 JSON；上傳就會更新呢本行程。</p>
+      {fallback ? <textarea className="prompt-box" readOnly value={fallback} onFocus={(event) => event.currentTarget.select()} /> : null}
     </div>
+  );
+}
+
+function DwellField({ value, name, onSave }: { value: number; name: string; onSave: (value: number | null) => void }) {
+  const [draft, setDraft] = useState(value ? String(value) : "");
+  function commit() {
+    const n = Number(draft);
+    const next = draft.trim() === "" || !Number.isFinite(n) || n <= 0 ? 0 : Math.min(720, Math.round(n));
+    if (next === value) {
+      setDraft(next ? String(next) : "");
+      return;
+    }
+    onSave(next || null);
+  }
+  return (
+    <label className="plan-dwell" title={value ? formatDwell(value) : "未估"}>
+      <input
+        type="number"
+        inputMode="numeric"
+        min={0}
+        max={720}
+        step={5}
+        value={draft}
+        placeholder="—"
+        aria-label={`${name} 停留分鐘`}
+        onChange={(event) => setDraft(event.target.value)}
+        onBlur={commit}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            event.currentTarget.blur();
+          }
+        }}
+      />
+      <span>分</span>
+    </label>
   );
 }
 

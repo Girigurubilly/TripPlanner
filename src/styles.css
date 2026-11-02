@@ -2957,3 +2957,210 @@ button.navrow:focus-visible,
     transform: scaleX(1);
   }
 }
+
+/* 今日規劃 — in-app day planner */
+.planner .section-label small {
+  font-weight: 500;
+  color: var(--muted);
+  margin-left: 6px;
+  font-size: 0.8em;
+}
+.plan-form .plan-reading,
+.plan-form .plan-flash {
+  margin: 6px 2px 0;
+}
+.plan-form .plan-flash {
+  color: var(--teal);
+}
+.dwell-pick {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+}
+.dwell-pick .stamp {
+  min-height: 40px;
+  padding: 0 12px;
+}
+.here .dwell-pick .dwell-input {
+  width: 84px;
+  margin-top: 0;
+}
+.plan-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+.plan-buttons .btn {
+  flex: 1 1 140px;
+}
+.plan-list {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  overflow: hidden;
+}
+.plan-row {
+  display: grid;
+  grid-template-columns: 36px 22px minmax(0, 1fr) auto;
+  grid-template-areas: "grip pos main dwell" "grip pos actions actions";
+  align-items: center;
+  column-gap: 6px;
+  row-gap: 6px;
+  padding: 10px 12px 10px 4px;
+  border-bottom: 1px solid var(--line);
+  background: #fff;
+}
+.plan-row:last-child {
+  border-bottom: 0;
+}
+.plan-row.lifted {
+  background: #f3faf9;
+  box-shadow: inset 3px 0 0 var(--teal);
+}
+.plan-list.dragging {
+  user-select: none;
+  -webkit-user-select: none;
+}
+.plan-grip {
+  grid-area: grip;
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  cursor: grab;
+  touch-action: none;
+}
+.plan-list.dragging .plan-grip {
+  cursor: grabbing;
+}
+.plan-pos {
+  grid-area: pos;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  font-size: 0.85rem;
+  text-align: center;
+}
+.plan-main {
+  grid-area: main;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.plan-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.plan-name strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.plan-kind {
+  flex: none;
+  font-style: normal;
+  font-size: 0.72rem;
+  padding: 2px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  color: var(--muted);
+}
+.plan-kind.meal {
+  color: var(--accent);
+  border-color: currentColor;
+}
+.plan-kind.spot {
+  color: var(--teal);
+  border-color: currentColor;
+}
+.plan-dwell {
+  grid-area: dwell;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+.plan-dwell input {
+  width: 64px;
+  min-height: 36px;
+  box-sizing: border-box;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 4px 8px;
+  font: inherit;
+  font-size: 16px;
+  text-align: right;
+  background: #fff;
+}
+.plan-actions {
+  grid-area: actions;
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+.plan-actions .stamp.icon {
+  min-width: 40px;
+  min-height: 36px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.plan-actions .stamp:disabled {
+  opacity: 0.35;
+}
+.plan-total {
+  margin: 10px 4px 0;
+  font-size: 0.95rem;
+}
+.plan-empty {
+  margin-top: 12px;
+  padding: 18px 14px;
+  border: 1px dashed var(--line);
+  border-radius: 16px;
+  text-align: center;
+  color: var(--muted);
+}
+.plan-empty p {
+  margin: 0 0 10px;
+}
+.plan-sub {
+  margin-top: 18px;
+  font-size: 0.95rem;
+}
+.plan-ai {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 16px;
+}
+.plan-ai .btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+@media (min-width: 560px) {
+  .plan-row {
+    grid-template-columns: 36px 22px minmax(0, 1fr) auto auto;
+    grid-template-areas: "grip pos main dwell actions";
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .plan-row {
+    transition: background-color 0.15s ease;
+  }
+}
