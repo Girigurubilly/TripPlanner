@@ -3144,6 +3144,15 @@ button.navrow:focus-visible,
   font-size: 0.82rem;
   color: var(--teal);
 }
+.day-schedule-sum {
+  margin: 0 0 10px;
+  color: var(--muted);
+}
+.stop-copy .plan-clock {
+  display: block;
+  margin-top: 2px;
+}
+
 .plan-leg {
   list-style: none;
   padding: 10px 12px 12px 42px;

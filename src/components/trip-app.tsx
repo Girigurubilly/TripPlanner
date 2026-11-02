@@ -83,11 +83,13 @@ import {
   removeDayEntry,
   reorderDayTimeline,
   rideForEntry,
+  rideTravelMin,
   saveTrips,
   setDayStartTime,
   setEntryDwell,
   setLegTravel,
   shiftVisitsOnRemove,
+  stopClockLabel,
   writeTripVisits,
   type PlanEntry,
   type DayEntry,
@@ -106,6 +108,7 @@ import { syncTripDriveIfDue } from "@/lib/drive-sync";
 import { AI_TRIP_PROMPT, planningPackPrompt, wishUpdatePrompt, type PlanPackDay } from "@/lib/ai-prompt";
 import { LOGGED_KEY, MONEY_WINDOW, openMoney, plainClick, dayCostItems, dayIdForDate, formatSpend, moneyEstimateUrl, rideRef, rideSpendLabel, tripCosts, tripEstimate, type SpendItem, type TripCosts, loadLoggedKeys, loadMoneyLinks, loadSentKeys, markSent, moneyLinkBackUrl, moneySpendUrl, moneyTripIdForBook, rankTripBooks, readMoneyRef, rememberMoneyRef, saveMoneyLink, spendItem, spendTimeHint, type MoneyTripRef, type SpendCategory } from "@/lib/money-link";
 import { placeFromMaps, resolveMapsPlace, shortMapsLink } from "@/lib/maps-place";
+import { estimateLegTravel } from "@/lib/travel-eta";
 import { startLocate, type PlaceFix } from "@/lib/geo";
 
 const TAB_ICON: Record<string, LucideIcon> = {
@@ -2066,6 +2069,9 @@ function DayScreen({
   const todayPoint = rationale?.points.find((point) => dayKey(point.label) === todayKey);
   const otherPoints = rationale?.points.filter((point) => point !== todayPoint) || [];
   const route = planItems(day);
+  const schedule = daySchedule(day);
+  const scheduleById = new Map(schedule.stops.map((stop) => [stop.entryId, stop]));
+  const dayFullTotal = schedule.dwellTotal + schedule.travelTotal;
   const headline = dayHeadline(day);
   const live = todayDay(trip)?.id === day.id;
   // While the trip is on, today's screen leads with 下一站 + the timeline;
@@ -2188,6 +2194,23 @@ function DayScreen({
               <span className="muted">已去 {seen}／{totalEntries}</span>
             </span>
           </h2>
+          {day.startTime || schedule.travelTotal || (schedule.dwellTotal && schedule.travelTotal) ? (
+            <p className="tiny day-schedule-sum">
+              {day.startTime ? <>出發 {day.startTime}</> : null}
+              {schedule.travelTotal ? (
+                <>
+                  {day.startTime ? " · " : ""}
+                  交通約 {formatDwell(schedule.travelTotal)}
+                </>
+              ) : null}
+              {schedule.dwellTotal && schedule.travelTotal ? (
+                <>
+                  {" "}
+                  · 全日約 {formatDwell(dayFullTotal)}
+                </>
+              ) : null}
+            </p>
+          ) : null}
           {totalEntries ? (
             <div className="meter" aria-hidden="true">
               <span style={{ width: `${Math.round((seen / totalEntries) * 100)}%` }} />
@@ -2231,6 +2254,7 @@ function DayScreen({
                 const mealIndex = item.index;
                 const mealItem = day.meals[mealIndex];
                 const at = visits[mealVisitKey(day.id, mealIndex)] || "";
+                const clock = stopClockLabel(scheduleById.get(mealItem.id));
                 return (
                   <article className={at ? "stop meal done" : "stop meal"} key={`meal-${mealItem.id}`}>
                     <span className="stop-num">{item.num}</span>
@@ -2246,6 +2270,7 @@ function DayScreen({
                           {mealItem.badge ? <em>{mealItem.badge}</em> : null}
                         </strong>
                         <small className="kind-chip">🍽️ 用餐{mealItem.slot ? ` · ${mealItem.slot}` : ""}</small>
+                        {clock ? <span className="plan-clock">{clock}</span> : null}
                         {mealItem.hours ? <small className="stop-hours">{mealItem.hours}</small> : null}
                         {mealItem.address || mealItem.price ? (
                           <small className="stop-addr">{[mealItem.address, mealItem.price].filter(Boolean).join(" · ")}</small>
@@ -2272,6 +2297,7 @@ function DayScreen({
                 const hotelIndex = item.index;
                 const hotelItem = day.hotels[hotelIndex];
                 const at = visits[hotelVisitKey(day.id, hotelIndex)] || "";
+                const clock = stopClockLabel(scheduleById.get(hotelItem.id));
                 return (
                   <article className={at ? "stop hotel done" : "stop hotel"} key={`hotel-${hotelItem.id}`}>
                     <span className="stop-num">{item.num}</span>
@@ -2287,6 +2313,7 @@ function DayScreen({
                           {hotelItem.badge ? <em>{hotelItem.badge}</em> : null}
                         </strong>
                         <small className="kind-chip">🛏️ 住宿</small>
+                        {clock ? <span className="plan-clock">{clock}</span> : null}
                         {hotelItem.hours ? <small className="stop-hours">{hotelItem.hours}</small> : null}
                         {hotelItem.address || hotelItem.price ? (
                           <small className="stop-addr">{[hotelItem.address, hotelItem.price].filter(Boolean).join(" · ")}</small>
@@ -2311,6 +2338,7 @@ function DayScreen({
               const spotIndex = item.index;
               const spotItem = day.spots[spotIndex];
               const at = visits[visitKey(day.id, spotIndex)] || "";
+              const clock = stopClockLabel(scheduleById.get(spotItem.id));
               return (
                 <article className={at ? "stop done" : "stop"} key={`${spotItem.name}-${spotIndex}`}>
                   <span className="stop-num">{item.num}</span>
@@ -2326,6 +2354,7 @@ function DayScreen({
                         {spotItem.badge ? <em>{spotItem.badge}</em> : null}
                       </strong>
                       <small className="kind-chip">📷 景點</small>
+                      {clock ? <span className="plan-clock">{clock}</span> : null}
                       {spotItem.hours ? <small className="stop-hours">{spotItem.hours}</small> : null}
                       {spotItem.address || spotItem.price ? (
                         <small className="stop-addr">{[spotItem.address, spotItem.price].filter(Boolean).join(" · ")}</small>
@@ -2661,7 +2690,15 @@ function RideCard({
   day?: TripDay;
   onOpenRide?: (ride: Ride) => void;
 }) {
-  const line = [ride.detail, ride.price].filter(Boolean).join(" · ");
+  const travelMin = rideTravelMin(ride);
+  const detailExtra = (ride.detail || "")
+    .replace(/約?\s*\d+\s*分鐘?/g, " ")
+    .replace(/約?\s*\d+\s*(?:min|mins|minutes)\b/gi, " ")
+    .replace(/\s+/g, " ")
+    .replace(/^[·,，、\s]+|[·,，、\s]+$/g, "")
+    .trim();
+  const duration = travelMin ? `約 ${travelMin} 分` : "";
+  const line = [duration || ride.detail, detailExtra && duration ? detailExtra : "", ride.price].filter(Boolean).join(" · ");
   const [open, setOpen] = useState(false);
   const hasLinkedStop = Boolean(ride.entry || ride.spot);
   return (
@@ -2685,7 +2722,7 @@ function RideCard({
       {open || (!hasLinkedStop && ride.note && ride.note.length <= 36) ? (
         <div className="ride-detail">
           {ride.mode ? <p className="tiny">方式：{ride.mode}</p> : null}
-          {ride.detail ? <p className="tiny">路程：{ride.detail}</p> : null}
+          {travelMin ? <p className="tiny">路程：約 {travelMin} 分{detailExtra ? ` · ${detailExtra}` : ""}</p> : ride.detail ? <p className="tiny">路程：{ride.detail}</p> : null}
           {ride.price ? <p className="tiny">費用：{ride.price}</p> : null}
           {ride.note ? <p className="tiny">{ride.note}</p> : null}
           {!ride.mode && !ride.detail && !ride.price && !ride.note ? <p className="tiny">未有更多班次資料。</p> : null}
@@ -3449,10 +3486,7 @@ function DayPlanner({ trip, day, onTrip }: { trip: TripBook; day: TripDay; onTri
           </label>
           <ol className={dragId ? "plan-list dragging" : "plan-list"} ref={listRef}>
             {shown.map((entry, position) => {
-              const stop = scheduleById.get(entry.id);
-              const arrive = stop?.arriveMin != null ? formatClock(stop.arriveMin) : "";
-              const leave = stop?.leaveMin != null ? formatClock(stop.leaveMin) : "";
-              const clock = arrive ? (leave ? `${arrive}–${leave}` : `到 ${arrive}`) : "";
+              const clock = stopClockLabel(scheduleById.get(entry.id));
               return (
                 <Fragment key={entry.id}>
                   {position > 0 ? (
@@ -3622,16 +3656,20 @@ function TravelLegRow({
   onTrip: (next: TripBook) => void;
 }) {
   const ride = rideForEntry(day, to.id);
-  const minutes = ride?.travelMin || 0;
+  const minutes = rideTravelMin(ride);
   const mode = ride?.mode || "";
   const [noteDraft, setNoteDraft] = useState(ride?.note || "");
+  const [estimating, setEstimating] = useState(false);
+  const [etaHint, setEtaHint] = useState("");
   const directions = legDirectionsUrl(day, from.id, to.id);
 
   useEffect(() => {
     setNoteDraft(ride?.note || "");
-  }, [ride?.note, to.id]);
+    setEtaHint("");
+  }, [ride?.note, ride?.travelMin, to.id]);
 
   function saveTravel(nextMin: number | null, nextMode: string | null) {
+    setEtaHint("");
     onTrip(
       setLegTravel(trip, day.id, to.id, {
         travelMin: nextMin,
@@ -3647,6 +3685,36 @@ function TravelLegRow({
     onTrip(setLegTravel(trip, day.id, to.id, { note: clean, travelMin: minutes || null, mode: mode || "" }));
   }
 
+  async function estimateTravel() {
+    if (estimating) return;
+    setEstimating(true);
+    setEtaHint("估算緊…");
+    try {
+      const result = await estimateLegTravel({
+        day,
+        fromEntryId: from.id,
+        toEntryId: to.id,
+        mode,
+      });
+      if (!result) {
+        setEtaHint("估唔到，請人手填");
+        return;
+      }
+      onTrip(
+        setLegTravel(trip, day.id, to.id, {
+          travelMin: result.travelMin,
+          mode: mode || result.mode,
+          note: noteDraft.trim() || "",
+        }),
+      );
+      setEtaHint(result.source === "osrm" ? "已用路線估算" : "已用距離估算");
+    } catch {
+      setEtaHint("估唔到，請人手填");
+    } finally {
+      setEstimating(false);
+    }
+  }
+
   return (
     <li className="plan-leg">
       <div className="plan-leg-head">
@@ -3654,6 +3722,15 @@ function TravelLegRow({
         <span className="pill-hint">
           {from.name} → {to.name}
         </span>
+        <button
+          className="stamp"
+          type="button"
+          disabled={estimating}
+          onClick={() => void estimateTravel()}
+          aria-label={`估時間：${from.name} 到 ${to.name}`}
+        >
+          {estimating ? "估算緊…" : "估時間"}
+        </button>
         {directions ? (
           <a className="stamp icon" href={directions} target="_blank" rel="noreferrer" aria-label={`開路線：${from.name} 到 ${to.name}`}>
             <Navigation size={14} />
@@ -3716,7 +3793,7 @@ function TravelLegRow({
           }
         }}
       />
-      {!minutes && !mode ? <p className="tiny plan-leg-hint">未估交通時間</p> : null}
+      {etaHint ? <p className="tiny plan-leg-hint">{etaHint}</p> : !minutes && !mode ? <p className="tiny plan-leg-hint">未估交通時間</p> : null}
     </li>
   );
 }
